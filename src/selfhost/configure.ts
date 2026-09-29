@@ -5,11 +5,20 @@ function valueAfter(flag: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+function valuesAfter(flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < process.argv.length - 1; i++) {
+    if (process.argv[i] === flag) values.push(process.argv[i + 1]);
+  }
+  return values;
+}
+
 const clearPublic = process.argv.includes('--clear-public-base');
 const publicBase = valueAfter('--public-base');
 const gatewayUrl = valueAfter('--gateway-url');
 const host = valueAfter('--host');
 const portRaw = valueAfter('--port');
+const allowedRoots = valuesAfter('--allowed-root');
 
 const current = await loadRuntimeConfig();
 
@@ -27,6 +36,9 @@ if (portRaw) {
     throw new Error('--port must be an integer from 1 to 65535');
   }
   current.port = port;
+}
+if (allowedRoots.length > 0) {
+  current.allowedRoots = [...new Set(allowedRoots)];
 }
 
 await saveRuntimeConfig(current);

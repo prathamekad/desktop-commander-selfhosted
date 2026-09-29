@@ -66,7 +66,8 @@ const child = spawn(process.execPath, ['dist/selfhost/gateway.js'], {
     SELFHOST_PORT: String(port),
     SELFHOST_OWNER_TOKEN: ownerToken,
     SELFHOST_DEVICE_TOKEN: deviceToken,
-    SELFHOST_AUDIT_LOG: auditPath
+    SELFHOST_AUDIT_LOG: auditPath,
+    SELFHOST_ALLOWED_ROOTS: 'C:\\SelfhostTest'
   }
 });
 
@@ -87,15 +88,47 @@ try {
     deviceId: 'test-device',
     deviceName: 'Test Device',
     version: 'test',
-    tools: [{
-      name: 'echo_selfhost_test',
-      description: 'Echo a value',
-      inputSchema: {
-        type: 'object',
-        properties: { value: { type: 'string' } },
-        required: ['value']
+    tools: [
+      {
+        name: 'echo_selfhost_test',
+        description: 'Echo a value',
+        inputSchema: {
+          type: 'object',
+          properties: { value: { type: 'string' } },
+          required: ['value']
+        }
+      },
+      {
+        name: 'start_process',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            command: { type: 'string' },
+            timeout_ms: { type: 'number' }
+          },
+          required: ['command', 'timeout_ms']
+        }
+      },
+      {
+        name: 'read_process_output',
+        inputSchema: {
+          type: 'object',
+          properties: { pid: { type: 'number' } },
+          required: ['pid']
+        }
+      },
+      {
+        name: 'set_config_value',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            key: { type: 'string' },
+            value: {}
+          },
+          required: ['key', 'value']
+        }
       }
-    }]
+    ]
   });
   assert.equal(registration.status, 200);
   const pollPromise = postJson(`${baseUrl}/api/device/poll`, deviceToken, {
@@ -116,6 +149,21 @@ try {
   const listed = await client.listTools();
   assert.ok(listed.tools.some((tool) => tool.name === 'echo_selfhost_test'));
   assert.ok(listed.tools.some((tool) => tool.name === 'selfhost_list_devices'));
+  assert.ok(listed.tools.some((tool) => tool.name === 'start_process'));
+  assert.equal(listed.tools.some((tool) => tool.name === 'set_config_value'), false);
+
+  const devices = await client.callTool({
+    name: 'selfhost_list_devices',
+    arguments: {}
+  });
+  assert.equal(devices.isError, undefined);
+
+  const unowned = await client.callTool({
+    name: 'read_process_output',
+    arguments: { pid: 999999 }
+  });
+  assert.equal(unowned.isError, true);
+  assert.match(unowned.content[0].text, /not owned/i);
 
   const callPromise = client.callTool({
     name: 'echo_selfhost_test',
@@ -139,11 +187,63 @@ try {
   const result = await callPromise;
   assert.equal(result.isError, undefined);
   assert.equal(result.content[0].text, 'hello');
+
+  const processPollPromise = postJson(`${baseUrl}/api/device/poll`, deviceToken, {
+    deviceId: 'test-device',
+    timeoutMs: 10_000
+  });
+  const startPromise = client.callTool({
+    name: 'start_process',
+    arguments: { command: 'npm test', timeout_ms: 1_000 }
+  });
+  const processPollResponse = await processPollPromise;
+  const { call: processCall } = await processPollResponse.json();
+  assert.equal(processCall.toolName, 'start_process');
+  assert.equal(
+    processCall.args.command,
+    "Set-Location -LiteralPath 'C:\\SelfhostTest'; npm test"
+  );
+
+  await postJson(`${baseUrl}/api/device/result`, deviceToken, {
+    callId: processCall.callId,
+    deviceId: 'test-device',
+    ok: true,
+    result: {
+      content: [{ type: 'text', text: 'Process started with PID 4242 (shell: powershell.exe)' }]
+    }
+  });
+  const started = await startPromise;
+  assert.equal(started.isError, undefined);
+
+  const outputPollPromise = postJson(`${baseUrl}/api/device/poll`, deviceToken, {
+    deviceId: 'test-device',
+    timeoutMs: 10_000
+  });
+  const outputPromise = client.callTool({
+    name: 'read_process_output',
+    arguments: { pid: 4242 }
+  });
+  const outputPollResponse = await outputPollPromise;
+  const { call: outputCall } = await outputPollResponse.json();
+  assert.equal(outputCall.toolName, 'read_process_output');
+  assert.equal(outputCall.args.pid, 4242);
+
+  await postJson(`${baseUrl}/api/device/result`, deviceToken, {
+    callId: outputCall.callId,
+    deviceId: 'test-device',
+    ok: true,
+    result: { content: [{ type: 'text', text: 'done' }] }
+  });
+  const outputResult = await outputPromise;
+  assert.equal(outputResult.isError, undefined);
+
   await client.close();
 
   const audit = await fs.readFile(auditPath, 'utf8');
   assert.match(audit, /tool_dispatched/);
   assert.match(audit, /tool_completed/);
+  assert.match(audit, /gateway_tool/);
+  assert.match(audit, /tool_rejected_policy/);
   console.log('selfhost gateway integration: PASS');
 } finally {
   if (child.exitCode === null) child.kill('SIGTERM');

@@ -7,6 +7,7 @@ export interface SelfHostRuntimeConfig {
   gatewayUrl?: string;
   host?: string;
   port?: number;
+  allowedRoots?: string[];
 }
 
 export const RUNTIME_CONFIG_PATH = path.join(SELFHOST_DIR, 'runtime.json');

@@ -8,6 +8,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { loadGatewaySecrets } from './credentials.js';
 import { OAuthRequestError, PersonalOAuth } from './oauth.js';
+import {
+  assertRemoteToolPolicy,
+  isPidControlledTool,
+  isRemoteToolVisible,
+  RemotePolicyError,
+  wrapPowerShellCommand
+} from './policy.js';
 import { loadRuntimeConfig } from './runtime-config.js';
 import {
   DEFAULT_CALL_TIMEOUT_MS,
@@ -33,13 +40,30 @@ interface DeviceState {
 interface TrackedCall extends PendingCall {
   startedMs: number;
 }
+
+function extractStartedPid(result: unknown): number | null {
+  try {
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    const match = /Process started with PID (-?\d+)/i.exec(text);
+    if (!match) return null;
+    const pid = Number(match[1]);
+    return Number.isInteger(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
 class PersonalRouter {
   private devices = new Map<string, DeviceState>();
   private pending = new Map<string, TrackedCall>();
+  private ownedPids = new Map<string, Set<number>>();
   private auditWrite: Promise<void> = Promise.resolve();
   private closing = false;
 
-  constructor(private readonly auditPath: string) {}
+  constructor(
+    private readonly auditPath: string,
+    private readonly allowedRoots: string[]
+  ) {}
 
   get acceptingCalls(): boolean {
     return !this.closing;
@@ -151,10 +175,15 @@ class PersonalRouter {
     const unique = new Map<string, DeviceTool>();
     for (const state of this.onlineStates()) {
       for (const tool of state.registration.tools) {
+        if (!isRemoteToolVisible(tool.name)) continue;
         if (!unique.has(tool.name)) unique.set(tool.name, this.withDeviceSelector(tool));
       }
     }
     return [...unique.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async auditGatewayTool(toolName: string, ok: boolean, fields: Record<string, unknown> = {}): Promise<void> {
+    await this.audit('gateway_tool', { toolName, ok, ...fields });
   }
 
   async poll(deviceId: string, timeoutMs: number): Promise<RoutedCall | null> {
@@ -199,6 +228,32 @@ class PersonalRouter {
     const requestedDevice = typeof args.deviceId === 'string' ? args.deviceId : undefined;
     delete args.deviceId;
     const state = this.selectDevice(toolName, requestedDevice);
+
+    try {
+      assertRemoteToolPolicy(toolName, args, this.allowedRoots);
+      if (isPidControlledTool(toolName)) {
+        const pid = typeof args.pid === 'number' ? args.pid : NaN;
+        if (!Number.isInteger(pid) || !this.ownedPids.get(state.registration.deviceId)?.has(pid)) {
+          throw new RemotePolicyError(
+            `PID ${String(args.pid)} is not owned by this remote MCP session.`,
+            'pid_not_owned'
+          );
+        }
+      }
+    } catch (error) {
+      const reason = error instanceof RemotePolicyError ? error.reason : 'policy_error';
+      await this.audit('tool_rejected_policy', {
+        deviceId: state.registration.deviceId,
+        toolName,
+        reason
+      });
+      throw error;
+    }
+
+    if (toolName === 'start_process' && typeof args.command === 'string') {
+      args.command = wrapPowerShellCommand(args.command, this.allowedRoots);
+    }
+
     const callId = crypto.randomUUID();
     const call: RoutedCall = {
       callId,
@@ -241,8 +296,23 @@ class PersonalRouter {
     this.devices.get(result.deviceId)?.inFlight.delete(result.callId);
     const durationMs = Date.now() - tracked.startedMs;
 
-    if (result.ok) tracked.resolve(result.result);
-    else tracked.reject(new Error(result.error || 'Device reported tool failure'));
+    if (result.ok) {
+      if (tracked.call.toolName === 'start_process') {
+        const pid = extractStartedPid(result.result);
+        if (pid !== null) {
+          const owned = this.ownedPids.get(result.deviceId) ?? new Set<number>();
+          owned.add(pid);
+          this.ownedPids.set(result.deviceId, owned);
+        }
+      }
+      if (tracked.call.toolName === 'kill_process' || tracked.call.toolName === 'force_terminate') {
+        const pid = tracked.call.args.pid;
+        if (typeof pid === 'number') this.ownedPids.get(result.deviceId)?.delete(pid);
+      }
+      tracked.resolve(result.result);
+    } else {
+      tracked.reject(new Error(result.error || 'Device reported tool failure'));
+    }
 
     void this.audit('tool_completed', {
       callId: result.callId,
@@ -439,8 +509,10 @@ function createMcpServer(router: PersonalRouter): Server {
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     try {
       if (name === 'selfhost_list_devices') {
+        const devices = router.listDevices();
+        await router.auditGatewayTool('selfhost_list_devices', true, { deviceCount: devices.length });
         return {
-          content: [{ type: 'text', text: JSON.stringify(router.listDevices(), null, 2) }]
+          content: [{ type: 'text', text: JSON.stringify(devices, null, 2) }]
         };
       }
       return await router.routeTool(name, args) as any;
@@ -513,7 +585,17 @@ export async function startGateway(): Promise<void> {
 
   const auditPath = process.env.SELFHOST_AUDIT_LOG
     ?? path.join(os.homedir(), '.desktop-commander-selfhosted', 'gateway-audit.jsonl');
-  const router = new PersonalRouter(auditPath);
+  const envAllowedRoots = (process.env.SELFHOST_ALLOWED_ROOTS ?? '')
+    .split(path.delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const allowedRoots = envAllowedRoots.length > 0 ? envAllowedRoots : (runtimeConfig.allowedRoots ?? []);
+  if (allowedRoots.length === 0) {
+    throw new Error(
+      'No remote workspace roots are configured. Run: npm run selfhost:configure -- --allowed-root <path>'
+    );
+  }
+  const router = new PersonalRouter(auditPath, allowedRoots);
   await router.initialize();
   let shuttingDown = false;
 
