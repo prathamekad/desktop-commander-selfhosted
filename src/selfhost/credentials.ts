@@ -6,6 +6,9 @@ import path from 'path';
 export interface GatewaySecrets {
   ownerToken: string;
   deviceToken: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthSigningSecret: string;
 }
 
 export interface DeviceSecret {
@@ -44,22 +47,35 @@ export async function initializeSecrets(force = false): Promise<{
 }> {
   await fs.mkdir(SELFHOST_DIR, { recursive: true, mode: 0o700 });
 
-  if (!force) {
-    const existingGateway = await loadGatewaySecrets();
-    const existingDevice = await loadDeviceSecret();
-    if (existingGateway?.ownerToken && existingGateway?.deviceToken && existingDevice?.deviceToken) {
-      return { gatewayPath: GATEWAY_SECRETS_PATH, devicePath: DEVICE_SECRET_PATH, created: false };
-    }
-  }
+  const existingGateway = force ? null : await loadGatewaySecrets();
+  const existingDevice = force ? null : await loadDeviceSecret();
 
   const secrets: GatewaySecrets = {
-    ownerToken: generateSecret(),
-    deviceToken: generateSecret()
+    ownerToken: existingGateway?.ownerToken ?? generateSecret(),
+    deviceToken: existingGateway?.deviceToken ?? existingDevice?.deviceToken ?? generateSecret(),
+    oauthClientId: existingGateway?.oauthClientId ?? `dc-selfhost-${crypto.randomBytes(12).toString('hex')}`,
+    oauthClientSecret: existingGateway?.oauthClientSecret ?? generateSecret(),
+    oauthSigningSecret: existingGateway?.oauthSigningSecret ?? generateSecret()
   };
 
-  await atomicWrite(GATEWAY_SECRETS_PATH, secrets);
-  await atomicWrite(DEVICE_SECRET_PATH, { deviceToken: secrets.deviceToken });
-  return { gatewayPath: GATEWAY_SECRETS_PATH, devicePath: DEVICE_SECRET_PATH, created: true };
+  const alreadyComplete = Boolean(
+    existingGateway?.ownerToken
+    && existingGateway?.deviceToken
+    && existingGateway?.oauthClientId
+    && existingGateway?.oauthClientSecret
+    && existingGateway?.oauthSigningSecret
+    && existingDevice?.deviceToken === secrets.deviceToken
+  );
+
+  if (!alreadyComplete || force) {
+    await atomicWrite(GATEWAY_SECRETS_PATH, secrets);
+    await atomicWrite(DEVICE_SECRET_PATH, { deviceToken: secrets.deviceToken });
+  }
+  return {
+    gatewayPath: GATEWAY_SECRETS_PATH,
+    devicePath: DEVICE_SECRET_PATH,
+    created: !alreadyComplete || force
+  };
 }
 
 async function atomicWrite(filePath: string, value: unknown): Promise<void> {

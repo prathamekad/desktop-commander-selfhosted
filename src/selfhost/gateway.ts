@@ -7,6 +7,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { loadGatewaySecrets } from './credentials.js';
+import { OAuthRequestError, PersonalOAuth } from './oauth.js';
+import { loadRuntimeConfig } from './runtime-config.js';
 import {
   DEFAULT_CALL_TIMEOUT_MS,
   DEVICE_STALE_MS,
@@ -319,11 +321,16 @@ class PersonalRouter {
   }
 }
 
-function tokenMatches(header: string | string[] | undefined, expected: string): boolean {
-  if (typeof header !== 'string') return false;
+function bearerToken(header: string | string[] | undefined): string | null {
+  if (typeof header !== 'string') return null;
   const match = /^Bearer\s+(.+)$/i.exec(header);
-  if (!match) return false;
-  const actual = Buffer.from(match[1]);
+  return match?.[1] ?? null;
+}
+
+function tokenMatches(header: string | string[] | undefined, expected: string): boolean {
+  const token = bearerToken(header);
+  if (!token) return false;
+  const actual = Buffer.from(token);
   const wanted = Buffer.from(expected);
   return actual.length === wanted.length && crypto.timingSafeEqual(actual, wanted);
 }
@@ -331,17 +338,43 @@ function tokenMatches(header: string | string[] | undefined, expected: string): 
 function authorized(req: IncomingMessage, expected: string | undefined, allowNoAuth = false): boolean {
   return allowNoAuth || (!!expected && tokenMatches(req.headers.authorization, expected));
 }
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+
+function authorizedMcp(
+  req: IncomingMessage,
+  ownerToken: string | undefined,
+  oauth: PersonalOAuth | null,
+  allowNoAuth: boolean
+): boolean {
+  if (allowNoAuth) return true;
+  if (ownerToken && tokenMatches(req.headers.authorization, ownerToken)) return true;
+  const token = bearerToken(req.headers.authorization);
+  return Boolean(token && oauth?.verifyAccessToken(token));
+}
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  extraHeaders: Record<string, string> = {}
+): void {
   const payload = Buffer.from(JSON.stringify(body));
   res.writeHead(status, {
     'content-type': 'application/json',
     'content-length': payload.length,
-    'cache-control': 'no-store'
+    'cache-control': 'no-store',
+    ...extraHeaders
   });
   res.end(payload);
 }
 
-async function readJson(req: IncomingMessage, maxBytes: number): Promise<any> {
+function redirect(res: ServerResponse, location: string): void {
+  res.writeHead(302, {
+    location,
+    'cache-control': 'no-store'
+  });
+  res.end();
+}
+
+async function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of req) {
@@ -354,14 +387,24 @@ async function readJson(req: IncomingMessage, maxBytes: number): Promise<any> {
     }
     chunks.push(buffer);
   }
-  if (total === 0) return {};
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJson(req: IncomingMessage, maxBytes: number): Promise<any> {
+  const raw = await readBody(req, maxBytes);
+  if (!raw) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return JSON.parse(raw);
   } catch {
     const error: any = new Error('invalid JSON body');
     error.status = 400;
     throw error;
   }
+}
+
+async function readForm(req: IncomingMessage, maxBytes: number): Promise<URLSearchParams> {
+  const raw = await readBody(req, maxBytes);
+  return new URLSearchParams(raw);
 }
 
 function parsePollTimeout(value: unknown): number {
@@ -416,13 +459,37 @@ function createMcpServer(router: PersonalRouter): Server {
 }
 
 export async function startGateway(): Promise<void> {
-  const host = process.env.SELFHOST_HOST ?? '127.0.0.1';
-  const port = Number(process.env.SELFHOST_PORT ?? 8787);
+  const runtimeConfig = await loadRuntimeConfig();
+  const host = process.env.SELFHOST_HOST ?? runtimeConfig.host ?? '127.0.0.1';
+  const port = Number(process.env.SELFHOST_PORT ?? runtimeConfig.port ?? 8787);
   const savedSecrets = await loadGatewaySecrets();
   const ownerToken = process.env.SELFHOST_OWNER_TOKEN ?? savedSecrets?.ownerToken;
   const deviceToken = process.env.SELFHOST_DEVICE_TOKEN ?? savedSecrets?.deviceToken;
   const allowNoAuth = process.env.SELFHOST_ALLOW_NOAUTH === 'true';
   const maxBodyBytes = Number(process.env.SELFHOST_MAX_BODY_BYTES ?? 32 * 1024 * 1024);
+  const publicBaseRaw = (process.env.SELFHOST_PUBLIC_BASE_URL ?? runtimeConfig.publicBaseUrl)?.trim();
+  const publicBase = publicBaseRaw ? new URL(publicBaseRaw).origin : null;
+  const oauthRedirectUris = [
+    'https://claude.ai/api/mcp/auth_callback',
+    ...(process.env.SELFHOST_OAUTH_REDIRECT_URIS ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+  ].map((value) => new URL(value).toString());
+
+  const oauth = publicBase
+    && savedSecrets?.oauthClientId
+    && savedSecrets?.oauthClientSecret
+    && savedSecrets?.oauthSigningSecret
+    ? new PersonalOAuth({
+        issuer: publicBase,
+        resource: `${publicBase}/mcp`,
+        clientId: savedSecrets.oauthClientId,
+        clientSecret: savedSecrets.oauthClientSecret,
+        signingSecret: savedSecrets.oauthSigningSecret,
+        redirectUris: oauthRedirectUris
+      })
+    : null;
 
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('SELFHOST_PORT must be an integer from 1 to 65535');
@@ -436,6 +503,12 @@ export async function startGateway(): Promise<void> {
   }
   if (allowNoAuth && !isLoopback(host)) {
     throw new Error('Unauthenticated MCP is allowed only on loopback');
+  }
+  if (publicBaseRaw && !publicBaseRaw.startsWith('https://')) {
+    throw new Error('SELFHOST_PUBLIC_BASE_URL must use https://');
+  }
+  if (publicBaseRaw && !oauth) {
+    throw new Error('OAuth secrets are missing. Run npm run selfhost:init before enabling SELFHOST_PUBLIC_BASE_URL.');
   }
 
   const auditPath = process.env.SELFHOST_AUDIT_LOG
@@ -454,9 +527,83 @@ export async function startGateway(): Promise<void> {
           ok: router.acceptingCalls,
           acceptingCalls: router.acceptingCalls,
           service: 'desktop-commander-selfhosted',
+          oauthEnabled: Boolean(oauth),
           time: nowIso(),
           devicesOnline: router.listDevices().filter((device) => device.online).length
         });
+        return;
+      }
+
+      if (method === 'GET' && (
+        url.pathname === '/.well-known/oauth-protected-resource'
+        || url.pathname === '/.well-known/oauth-protected-resource/mcp'
+      )) {
+        if (!oauth) {
+          sendJson(res, 404, { error: 'oauth_not_configured' });
+          return;
+        }
+        sendJson(res, 200, oauth.protectedResourceMetadata(), {
+          'access-control-allow-origin': '*'
+        });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/.well-known/oauth-authorization-server') {
+        if (!oauth) {
+          sendJson(res, 404, { error: 'oauth_not_configured' });
+          return;
+        }
+        sendJson(res, 200, oauth.authorizationServerMetadata(), {
+          'access-control-allow-origin': '*'
+        });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/oauth/authorize') {
+        if (!oauth) {
+          sendJson(res, 404, { error: 'oauth_not_configured' });
+          return;
+        }
+        try {
+          redirect(res, oauth.authorize(url.searchParams));
+        } catch (error) {
+          if (error instanceof OAuthRequestError) {
+            sendJson(res, 400, {
+              error: error.oauthError,
+              error_description: error.message
+            });
+          } else {
+            throw error;
+          }
+        }
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/oauth/token') {
+        if (!oauth) {
+          sendJson(res, 404, { error: 'oauth_not_configured' });
+          return;
+        }
+        try {
+          const form = await readForm(req, Math.min(maxBodyBytes, 64 * 1024));
+          const grantType = form.get('grant_type');
+          const result = grantType === 'authorization_code'
+            ? oauth.exchangeAuthorizationCode(form, req.headers.authorization)
+            : grantType === 'refresh_token'
+              ? oauth.refresh(form, req.headers.authorization)
+              : (() => { throw new OAuthRequestError('unsupported_grant_type'); })();
+          sendJson(res, 200, result);
+        } catch (error) {
+          if (error instanceof OAuthRequestError) {
+            const status = error.oauthError === 'invalid_client' ? 401 : 400;
+            sendJson(res, status, {
+              error: error.oauthError,
+              error_description: error.message
+            });
+          } else {
+            throw error;
+          }
+        }
         return;
       }
 
@@ -517,12 +664,17 @@ export async function startGateway(): Promise<void> {
         return;
       }
       if (url.pathname === '/mcp') {
-        if (!authorized(req, ownerToken, allowNoAuth)) {
+        if (!authorizedMcp(req, ownerToken, oauth, allowNoAuth)) {
+          const headers: Record<string, string> = {};
+          if (oauth && publicBase) {
+            headers['www-authenticate'] =
+              `Bearer resource_metadata="${publicBase}/.well-known/oauth-protected-resource", scope="mcp:tools"`;
+          }
           sendJson(res, 401, {
             jsonrpc: '2.0',
             error: { code: -32001, message: 'Unauthorized' },
             id: null
-          });
+          }, headers);
           return;
         }
         if (method !== 'POST') {
@@ -565,7 +717,8 @@ export async function startGateway(): Promise<void> {
       console.log('Desktop Commander Self-Hosted Gateway');
       console.log(`  MCP:     http://${host}:${port}/mcp`);
       console.log(`  Device:  http://${host}:${port}/api/device/*`);
-      console.log(`  Auth:    ${allowNoAuth ? 'MCP no-auth on loopback' : 'MCP bearer token'}`);
+      console.log(`  Auth:    ${allowNoAuth ? 'MCP no-auth on loopback' : oauth ? 'owner bearer + OAuth' : 'owner bearer token'}`);
+      console.log(`  OAuth:   ${oauth && publicBase ? `enabled for ${publicBase}` : 'disabled (set SELFHOST_PUBLIC_BASE_URL)'}`);
       console.log('  Quotas:  none');
       console.log(`  Audit:   ${auditPath}`);
       resolve();

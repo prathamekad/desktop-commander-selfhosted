@@ -5,6 +5,7 @@ import path from 'path';
 import { DesktopCommanderIntegration } from '../remote-device/desktop-commander-integration.js';
 import { VERSION } from '../version.js';
 import { loadDeviceSecret } from './credentials.js';
+import { loadRuntimeConfig } from './runtime-config.js';
 import { DeviceRegistration, RoutedCall, RoutedResult } from './protocol.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.desktop-commander-selfhosted');
@@ -134,7 +135,8 @@ class GatewayClient {
 export async function startSelfHostedDevice(): Promise<void> {
   process.env.DESKTOP_COMMANDER_DISABLE_TELEMETRY = 'true';
 
-  const gatewayUrl = process.env.SELFHOST_GATEWAY_URL ?? 'http://127.0.0.1:8787';
+  const runtimeConfig = await loadRuntimeConfig();
+  const gatewayUrl = process.env.SELFHOST_GATEWAY_URL ?? runtimeConfig.gatewayUrl ?? 'http://127.0.0.1:8787';
   const savedSecret = await loadDeviceSecret();
   const token = process.env.SELFHOST_DEVICE_TOKEN ?? savedSecret?.deviceToken;
   if (!token) {

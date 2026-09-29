@@ -1,4 +1,5 @@
 # Personal Self-Hosted Remote MCP
+# Personal Self-Hosted Remote MCP
 
 This fork adds a personal-only Remote MCP path that does not depend on the hosted
 Desktop Commander relay.
@@ -40,7 +41,8 @@ PC when the gateway is elsewhere.
 
 - The gateway binds to `127.0.0.1` by default.
 - Device endpoints always require `SELFHOST_DEVICE_TOKEN`.
-- MCP requests require `SELFHOST_OWNER_TOKEN` unless no-auth is explicitly enabled.
+- MCP requests accept the private owner bearer token or a valid OAuth access token.
+- OAuth uses PKCE S256, exact redirect URI allowlisting, short-lived access tokens, refresh tokens, and a pre-registered personal client.
 - No-auth mode is refused unless the gateway is bound to loopback.
 - Self-hosted device mode disables upstream Desktop Commander telemetry.
 - Audit logs contain routing metadata only, not tool arguments or tool results.
@@ -103,6 +105,52 @@ npm run selfhost:gateway
 
 Do not reuse the owner token as the device token.
 
+## Public HTTPS + OAuth
+
+The gateway remains bound to loopback. A trusted HTTPS reverse tunnel can publish it
+without opening a raw inbound port. For the current personal deployment, Tailscale
+Funnel proxies:
+
+```text
+https://<device>.<tailnet>.ts.net -> http://127.0.0.1:8787
+```
+
+Configure the canonical public origin once Funnel is live:
+
+```powershell
+npm run selfhost:configure -- --public-base https://<device>.<tailnet>.ts.net
+```
+
+OAuth discovery endpoints are then exposed at:
+
+```text
+/.well-known/oauth-protected-resource
+/.well-known/oauth-authorization-server
+/oauth/authorize
+/oauth/token
+```
+
+The MCP URL is `https://<device>.<tailnet>.ts.net/mcp`.
+
+For Claude custom connectors, use `npm run selfhost:connector-info` locally to obtain
+the MCP URL plus OAuth Client ID and Client Secret. The command intentionally does not
+print owner/device tokens.
+
+## Windows unattended startup
+
+On Windows, install the current-user Startup launcher:
+
+```powershell
+npm run selfhost:install-windows
+```
+
+This starts a hidden supervisor at logon. The supervisor keeps both the gateway and
+device agent running and restarts either child after a crash. Remove it with:
+
+```powershell
+npm run selfhost:uninstall-windows
+```
+
 ## Multiple personal devices
 
 Run the device agent on each PC with the same gateway URL and device credential.
@@ -124,6 +172,8 @@ Use `selfhost_list_devices` to inspect current device IDs and reachability.
 | `SELFHOST_DEVICE_TOKEN` | both | none | Required device authentication |
 | `SELFHOST_OWNER_TOKEN` | gateway | none | MCP bearer authentication |
 | `SELFHOST_ALLOW_NOAUTH` | gateway | `false` | Loopback-only no-auth MCP mode |
+| `SELFHOST_PUBLIC_BASE_URL` | gateway | runtime config | Canonical HTTPS origin used for OAuth discovery/resources |
+| `SELFHOST_OAUTH_REDIRECT_URIS` | gateway | Claude callback | Optional comma-separated additional exact OAuth callbacks |
 | `SELFHOST_CALL_TIMEOUT_MS` | gateway | `120000` | Routed call timeout |
 | `SELFHOST_DELIVERY_LEASE_MS` | gateway | `45000` | Retry lease for lost delivery |
 | `SELFHOST_AUDIT_LOG` | gateway | user profile | Metadata-only JSONL audit log |
@@ -144,7 +194,10 @@ The first working milestone supports:
 - one or more personal devices
 - outbound device connectivity
 - bearer-token device authentication
-- optional bearer-token MCP authentication
+- private owner-bearer MCP authentication
+- standards-oriented OAuth discovery + authorization-code/PKCE flow for public connectors
+- HTTPS publication through an external tunnel while the gateway stays loopback-only
+- hidden Windows logon supervisor with child restart
 - duplicate-delivery protection
 - generated owner/device credentials stored outside the repository
 - metadata-only audit receipts
