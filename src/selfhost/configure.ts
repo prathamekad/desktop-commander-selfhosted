@@ -18,6 +18,7 @@ const publicBase = valueAfter('--public-base');
 const gatewayUrl = valueAfter('--gateway-url');
 const host = valueAfter('--host');
 const portRaw = valueAfter('--port');
+const publicPortRaw = valueAfter('--public-port');
 const allowedRoots = valuesAfter('--allowed-root');
 
 const current = await loadRuntimeConfig();
@@ -36,6 +37,13 @@ if (portRaw) {
     throw new Error('--port must be an integer from 1 to 65535');
   }
   current.port = port;
+}
+if (publicPortRaw) {
+  const publicPort = Number(publicPortRaw);
+  if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65535) {
+    throw new Error('--public-port must be an integer from 1 to 65535');
+  }
+  current.publicPort = publicPort;
 }
 if (allowedRoots.length > 0) {
   current.allowedRoots = [...new Set(allowedRoots)];

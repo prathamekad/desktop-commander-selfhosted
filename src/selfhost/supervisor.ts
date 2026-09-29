@@ -66,7 +66,7 @@ function logStream(name: string): fs.WriteStream {
   });
 }
 
-function startManaged(name: 'gateway' | 'device'): void {
+function startManaged(name: 'gateway' | 'device' | 'public-proxy'): void {
   if (shuttingDown) return;
   const script = path.join(__dirname, `${name}.js`);
   const stdout = logStream(name);
@@ -128,7 +128,7 @@ async function ensureTailscaleFunnel(): Promise<void> {
     const publicUrl = new URL(runtime.publicBaseUrl);
     if (!publicUrl.hostname.endsWith('.ts.net')) return;
 
-    const port = runtime.port ?? 8787;
+    const port = runtime.publicPort ?? 8788;
     let status = runTailscale(['status', '--json']);
     let backendState = '';
 
@@ -241,6 +241,8 @@ async function main(): Promise<void> {
   await appendSupervisor(`supervisor started pid=${process.pid}`);
   startManaged('gateway');
   startManaged('device');
+  const runtime = await loadRuntimeConfig();
+  if (runtime.publicBaseUrl) startManaged('public-proxy');
 
   setTimeout(() => void ensureTailscaleFunnel(), 2_000);
   tailscaleTimer = setInterval(() => {

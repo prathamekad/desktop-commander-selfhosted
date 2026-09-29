@@ -7,6 +7,7 @@ export interface SelfHostRuntimeConfig {
   gatewayUrl?: string;
   host?: string;
   port?: number;
+  publicPort?: number;
   allowedRoots?: string[];
 }
 

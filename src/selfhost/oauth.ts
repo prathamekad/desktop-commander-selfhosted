@@ -29,6 +29,7 @@ interface TokenPayload {
 }
 
 const CODE_TTL_MS = 5 * 60_000;
+const MAX_PENDING_AUTH_CODES = 256;
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -97,6 +98,13 @@ export class PersonalOAuth {
     }
     if (normalizeUrl(requestedResource) !== normalizeUrl(this.config.resource)) {
       throw new OAuthRequestError('invalid_target', 'Unexpected resource');
+    }
+
+    this.sweepCodes();
+    while (this.codes.size >= MAX_PENDING_AUTH_CODES) {
+      const oldest = this.codes.keys().next().value;
+      if (typeof oldest !== 'string') break;
+      this.codes.delete(oldest);
     }
 
     const code = crypto.randomBytes(32).toString('base64url');

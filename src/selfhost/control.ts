@@ -84,6 +84,7 @@ async function status(): Promise<void> {
   const runtime = await loadRuntimeConfig();
   const pid = await supervisorPid();
   const localBase = `http://127.0.0.1:${runtime.port ?? 8787}`;
+  const publicLocalBase = `http://127.0.0.1:${runtime.publicPort ?? 8788}`;
 
   console.log('Desktop Commander Selfhost');
   console.log(`Supervisor:  ${pid ? `RUNNING (PID ${pid})` : 'STOPPED'}`);
@@ -98,6 +99,17 @@ async function status(): Promise<void> {
     console.log(`OAuth:       ${health.oauthEnabled ? 'enabled' : 'disabled'}`);
   } catch {
     console.log('Gateway:     UNREACHABLE');
+  }
+
+  if (runtime.publicBaseUrl) {
+    try {
+      const response = await fetch(`${publicLocalBase}/healthz`, {
+        signal: AbortSignal.timeout(2_000)
+      });
+      console.log(`Public proxy:${response.ok ? ' HEALTHY' : ' UNHEALTHY'}`);
+    } catch {
+      console.log('Public proxy: UNREACHABLE');
+    }
   }
 
   if (process.platform === 'win32') {

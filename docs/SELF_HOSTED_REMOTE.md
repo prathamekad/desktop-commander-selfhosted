@@ -48,9 +48,15 @@ PC when the gateway is elsewhere.
 - Audit logs contain routing metadata only, not tool arguments or tool results.
 - A persistent attempted-call journal blocks duplicate execution after delivery retries.
 - Existing Desktop Commander allowed-directory and blocked-command controls remain active.
+- The self-hosted gateway independently enforces approved absolute workspace roots for filesystem tools.
+- Remote config mutation, upstream feedback/prompts, global process/session listing, and historical tool-call listing are not exposed.
+- Process-control operations can target only PIDs created through the current remote gateway lifetime.
+- Remote URL fetching through the Home device and `node:local` are disabled.
+- Remote process commands start from the first approved workspace root and reject obvious path/system-management escapes.
+- Arbitrary shell execution is still a powerful capability, not a hard OS sandbox. For a hard process/filesystem boundary, run the device agent under a dedicated OS identity, container, or VM.
 
-Do not expose the development HTTP listener directly to the public internet. Put TLS
-and appropriate access control in front of it, or use a supported private MCP tunnel.
+The private core listener must remain on loopback. Public access goes through the
+separate public facade and a trusted HTTPS tunnel.
 
 ## Build and initialize personal credentials
 
@@ -109,16 +115,23 @@ Do not reuse the owner token as the device token.
 
 The gateway remains bound to loopback. A trusted HTTPS reverse tunnel can publish it
 without opening a raw inbound port. For the current personal deployment, Tailscale
-Funnel proxies:
+Funnel proxies only the public facade:
 
 ```text
-https://<device>.<tailnet>.ts.net -> http://127.0.0.1:8787
+internet
+  -> https://<device>.<tailnet>.ts.net
+  -> 127.0.0.1:8788  public OAuth/MCP facade
+  -> 127.0.0.1:8787  private gateway core
 ```
 
-Configure the canonical public origin once Funnel is live:
+The public facade returns 404 for device/control APIs and accepts `/mcp` only with
+a valid OAuth access token. Device-agent endpoints and the private owner bearer remain
+on the loopback-only core.
+
+Configure the canonical public origin and public facade port once Funnel is live:
 
 ```powershell
-npm run selfhost:configure -- --public-base https://<device>.<tailnet>.ts.net
+npm run selfhost:configure -- --public-base https://<device>.<tailnet>.ts.net --public-port 8788
 ```
 
 OAuth discovery endpoints are then exposed at:
@@ -144,8 +157,8 @@ On Windows, install the current-user Startup launcher:
 npm run selfhost:install-windows
 ```
 
-This starts a hidden supervisor at logon. The supervisor keeps both the gateway and
-device agent running and restarts either child after a crash. When the configured public
+This starts a hidden supervisor at logon. The supervisor keeps the private gateway,
+public facade, and device agent running and restarts a child after a crash. When the configured public
 origin is a Tailscale `*.ts.net` URL, it also checks Tailscale health every minute: if the
 Windows backend falls out of `Running`, it launches the Tailscale IPN client to recover the
 active tailnet session; if the Funnel mapping disappears, it reapplies only the configured
@@ -154,6 +167,19 @@ loopback MCP port. Remove the launcher with:
 ```powershell
 npm run selfhost:uninstall-windows
 ```
+
+The installer also creates Start Menu controls under **Desktop Commander Selfhost**:
+Start, Status, Restart, and Stop. The equivalent terminal commands are:
+
+```powershell
+npm run selfhost:start
+npm run selfhost:status
+npm run selfhost:restart
+npm run selfhost:stop
+```
+
+Normal daily use requires none of these commands: signing into Windows starts the
+supervisor automatically.
 
 ## Multiple personal devices
 
@@ -172,7 +198,9 @@ Use `selfhost_list_devices` to inspect current device IDs and reachability.
 | Variable | Side | Default | Purpose |
 | --- | --- | --- | --- |
 | `SELFHOST_HOST` | gateway | `127.0.0.1` | Bind address |
-| `SELFHOST_PORT` | gateway | `8787` | HTTP/MCP port |
+| `SELFHOST_PORT` | private gateway | `8787` | Loopback-only core/device port |
+| `SELFHOST_PUBLIC_PORT` | public facade | `8788` | Loopback public-facade port used by the HTTPS tunnel |
+| `SELFHOST_ALLOWED_ROOTS` | gateway | runtime config | OS-delimiter-separated workspace roots; runtime `--allowed-root` is preferred |
 | `SELFHOST_DEVICE_TOKEN` | both | none | Required device authentication |
 | `SELFHOST_OWNER_TOKEN` | gateway | none | MCP bearer authentication |
 | `SELFHOST_ALLOW_NOAUTH` | gateway | `false` | Loopback-only no-auth MCP mode |
@@ -200,7 +228,11 @@ The first working milestone supports:
 - bearer-token device authentication
 - private owner-bearer MCP authentication
 - standards-oriented OAuth discovery + authorization-code/PKCE flow for public connectors
-- HTTPS publication through an external tunnel while the gateway stays loopback-only
+- bounded pending OAuth authorization-code cache
+- split private core/public OAuth-MCP facade; device/control APIs never enter the public tunnel
+- HTTPS publication through an external tunnel while both listeners stay loopback-only
+- independent gateway workspace-root enforcement in addition to upstream file validation
+- remote-only tool-surface reduction and remote-owned PID enforcement
 - hidden Windows logon supervisor with child restart
 - duplicate-delivery protection
 - generated owner/device credentials stored outside the repository

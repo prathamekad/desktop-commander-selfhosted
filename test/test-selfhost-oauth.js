@@ -62,4 +62,24 @@ const badRedirect = new URLSearchParams(authorize);
 badRedirect.set('redirect_uri', 'https://attacker.example/callback');
 assert.throws(() => oauth.authorize(badRedirect), /Unregistered redirect_uri/);
 
+const boundedOauth = new PersonalOAuth({
+  issuer: 'https://example.test',
+  resource: 'https://example.test/mcp',
+  clientId: 'client-test',
+  clientSecret: 'secret-test',
+  signingSecret: 'signing-secret-test',
+  redirectUris: ['https://claude.ai/api/mcp/auth_callback']
+});
+let oldestCode = '';
+for (let i = 0; i < 257; i++) {
+  const callback = new URL(boundedOauth.authorize(authorize));
+  if (i === 0) oldestCode = callback.searchParams.get('code');
+}
+const evictedExchange = new URLSearchParams(exchange);
+evictedExchange.set('code', oldestCode);
+assert.throws(
+  () => boundedOauth.exchangeAuthorizationCode(evictedExchange, basic),
+  /invalid_grant/
+);
+
 console.log('selfhost oauth: PASS');
