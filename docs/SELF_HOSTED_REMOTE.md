@@ -50,31 +50,40 @@ PC when the gateway is elsewhere.
 Do not expose the development HTTP listener directly to the public internet. Put TLS
 and appropriate access control in front of it, or use a supported private MCP tunnel.
 
-## Build
+## Build and initialize personal credentials
 
 ```powershell
 npm ci
 npm run build
+npm run selfhost:init
 ```
+
+`selfhost:init` generates two strong random credentials without printing them:
+
+- `gateway-secrets.json`: owner + device credentials; keep this on the gateway machine.
+- `device-secret.json`: device credential only; this is the only secret file to copy to another personal device.
+
+Both live under `~/.desktop-commander-selfhosted`. Environment variables can still override the files for testing or service deployment.
 
 ## Local single-machine test
 
-Generate a strong device token. In terminal 1:
+After `selfhost:init`, terminal 1 can simply run:
 
 ```powershell
-$env:SELFHOST_DEVICE_TOKEN="<random-secret>"
-$env:SELFHOST_ALLOW_NOAUTH="true"
 npm run selfhost:gateway
 ```
 
-No-auth is safe here only because the gateway defaults to loopback.
+For a deliberately unauthenticated loopback-only MCP test, set `SELFHOST_ALLOW_NOAUTH=true`.
+The gateway refuses no-auth mode when bound beyond loopback.
 In terminal 2:
 
 ```powershell
-$env:SELFHOST_DEVICE_TOKEN="<same-random-secret>"
-$env:SELFHOST_GATEWAY_URL="http://127.0.0.1:8787"
 npm run selfhost:device
 ```
+
+For a device on another machine, copy only `device-secret.json` into that user's
+`~/.desktop-commander-selfhosted` directory and set `SELFHOST_GATEWAY_URL` to the
+private gateway URL.
 
 The gateway MCP endpoint is:
 
@@ -137,9 +146,13 @@ The first working milestone supports:
 - bearer-token device authentication
 - optional bearer-token MCP authentication
 - duplicate-delivery protection
+- generated owner/device credentials stored outside the repository
 - metadata-only audit receipts
+- restart recovery that marks unresolved calls as abandoned/unknown
+- graceful shutdown that refuses new work and releases waiting requests
 - automatic device re-registration after gateway restart
 - no hosted Desktop Commander service dependency in the call path
 
-Gateway queues are currently in memory. A gateway process restart therefore abandons
-calls that were already in flight. Durable queue recovery is a later hardening step.
+Gateway routing state is intentionally in memory. A gateway restart never blindly
+replays an in-flight side-effecting call. The audit ledger records it as abandoned
+with unknown execution state so the caller can make an explicit, tool-aware retry decision.

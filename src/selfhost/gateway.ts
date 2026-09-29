@@ -6,6 +6,7 @@ import path from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { loadGatewaySecrets } from './credentials.js';
 import {
   DEFAULT_CALL_TIMEOUT_MS,
   DEVICE_STALE_MS,
@@ -34,10 +35,81 @@ class PersonalRouter {
   private devices = new Map<string, DeviceState>();
   private pending = new Map<string, TrackedCall>();
   private auditWrite: Promise<void> = Promise.resolve();
+  private closing = false;
 
   constructor(private readonly auditPath: string) {}
 
+  get acceptingCalls(): boolean {
+    return !this.closing;
+  }
+
+  async initialize(): Promise<void> {
+    await fs.mkdir(path.dirname(this.auditPath), { recursive: true });
+    let contents = '';
+    try {
+      contents = await fs.readFile(this.auditPath, 'utf8');
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return;
+      throw error;
+    }
+
+    const unresolved = new Map<string, Record<string, unknown>>();
+    for (const line of contents.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        const callId = typeof event.callId === 'string' ? event.callId : undefined;
+        if (!callId) continue;
+        if (event.event === 'tool_dispatched') unresolved.set(callId, event);
+        if (['tool_completed', 'tool_timeout', 'tool_abandoned_shutdown', 'tool_abandoned_restart'].includes(event.event)) {
+          unresolved.delete(callId);
+        }
+      } catch {
+        // A partially written final audit line must not stop startup.
+      }
+    }
+
+    for (const [callId, prior] of unresolved) {
+      await this.audit('tool_abandoned_restart', {
+        callId,
+        deviceId: prior.deviceId ?? null,
+        toolName: prior.toolName ?? null,
+        reason: 'gateway_restarted_before_terminal_receipt'
+      });
+    }
+  }
+
+  async shutdown(reason: string): Promise<void> {
+    if (this.closing) return;
+    this.closing = true;
+
+    for (const state of this.devices.values()) {
+      const waiter = state.pollWaiter;
+      delete state.pollWaiter;
+      waiter?.(null);
+    }
+
+    for (const [callId, tracked] of [...this.pending]) {
+      this.pending.delete(callId);
+      clearTimeout(tracked.timeout);
+      const state = this.devices.get(tracked.call.deviceId);
+      state?.inFlight.delete(callId);
+      tracked.reject(new Error(
+        'Gateway is shutting down; execution state is unknown. Do not blindly retry side-effecting tools.'
+      ));
+      await this.audit('tool_abandoned_shutdown', {
+        callId,
+        deviceId: tracked.call.deviceId,
+        toolName: tracked.call.toolName,
+        reason
+      });
+    }
+
+    await this.auditWrite;
+  }
+
   register(registration: DeviceRegistration): DeviceSnapshot {
+    if (this.closing) throw new Error('Gateway is shutting down');
     const prior = this.devices.get(registration.deviceId);
     this.devices.set(registration.deviceId, {
       registration,
@@ -84,6 +156,7 @@ class PersonalRouter {
   }
 
   async poll(deviceId: string, timeoutMs: number): Promise<RoutedCall | null> {
+    if (this.closing) return null;
     const state = this.devices.get(deviceId);
     if (!state) throw new Error('Device is not registered');
     state.lastSeenMs = Date.now();
@@ -119,6 +192,7 @@ class PersonalRouter {
     });
   }
   async routeTool(toolName: string, rawArgs: Record<string, unknown>): Promise<unknown> {
+    if (this.closing) throw new Error('Gateway is shutting down and is not accepting new tool calls');
     const args = { ...rawArgs };
     const requestedDevice = typeof args.deviceId === 'string' ? args.deviceId : undefined;
     delete args.deviceId;
@@ -344,8 +418,9 @@ function createMcpServer(router: PersonalRouter): Server {
 export async function startGateway(): Promise<void> {
   const host = process.env.SELFHOST_HOST ?? '127.0.0.1';
   const port = Number(process.env.SELFHOST_PORT ?? 8787);
-  const ownerToken = process.env.SELFHOST_OWNER_TOKEN;
-  const deviceToken = process.env.SELFHOST_DEVICE_TOKEN;
+  const savedSecrets = await loadGatewaySecrets();
+  const ownerToken = process.env.SELFHOST_OWNER_TOKEN ?? savedSecrets?.ownerToken;
+  const deviceToken = process.env.SELFHOST_DEVICE_TOKEN ?? savedSecrets?.deviceToken;
   const allowNoAuth = process.env.SELFHOST_ALLOW_NOAUTH === 'true';
   const maxBodyBytes = Number(process.env.SELFHOST_MAX_BODY_BYTES ?? 32 * 1024 * 1024);
 
@@ -366,6 +441,8 @@ export async function startGateway(): Promise<void> {
   const auditPath = process.env.SELFHOST_AUDIT_LOG
     ?? path.join(os.homedir(), '.desktop-commander-selfhosted', 'gateway-audit.jsonl');
   const router = new PersonalRouter(auditPath);
+  await router.initialize();
+  let shuttingDown = false;
 
   const listener = http.createServer(async (req, res) => {
     try {
@@ -373,8 +450,9 @@ export async function startGateway(): Promise<void> {
       const url = new URL(req.url ?? '/', 'http://localhost');
 
       if (method === 'GET' && url.pathname === '/healthz') {
-        sendJson(res, 200, {
-          ok: true,
+        sendJson(res, router.acceptingCalls ? 200 : 503, {
+          ok: router.acceptingCalls,
+          acceptingCalls: router.acceptingCalls,
           service: 'desktop-commander-selfhosted',
           time: nowIso(),
           devicesOnline: router.listDevices().filter((device) => device.online).length
@@ -479,13 +557,35 @@ export async function startGateway(): Promise<void> {
     }
   });
 
-  listener.listen(port, host, () => {
-    console.log('Desktop Commander Self-Hosted Gateway');
-    console.log(`  MCP:     http://${host}:${port}/mcp`);
-    console.log(`  Device:  http://${host}:${port}/api/device/*`);
-    console.log(`  Auth:    ${allowNoAuth ? 'MCP no-auth on loopback' : 'MCP bearer token'}`);
-    console.log('  Quotas:  none');
-    console.log(`  Audit:   ${auditPath}`);
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    listener.once('error', onError);
+    listener.listen(port, host, () => {
+      listener.off('error', onError);
+      console.log('Desktop Commander Self-Hosted Gateway');
+      console.log(`  MCP:     http://${host}:${port}/mcp`);
+      console.log(`  Device:  http://${host}:${port}/api/device/*`);
+      console.log(`  Auth:    ${allowNoAuth ? 'MCP no-auth on loopback' : 'MCP bearer token'}`);
+      console.log('  Quotas:  none');
+      console.log(`  Audit:   ${auditPath}`);
+      resolve();
+    });
+  });
+
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[gateway] ${signal} received; refusing new work and draining requests`);
+    await router.shutdown(signal);
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+    console.log('[gateway] shutdown complete');
+  };
+
+  process.once('SIGINT', () => {
+    void shutdown('SIGINT').finally(() => process.exit(0));
+  });
+  process.once('SIGTERM', () => {
+    void shutdown('SIGTERM').finally(() => process.exit(0));
   });
 }
 const invokedPath = process.argv[1]?.replace(/\\/g, '/');
