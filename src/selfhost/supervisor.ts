@@ -1,8 +1,9 @@
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, spawn, spawnSync } from 'child_process';
 import fs, { promises as fsp } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SELFHOST_DIR } from './credentials.js';
+import { loadRuntimeConfig } from './runtime-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,8 @@ const SUPERVISOR_LOG = path.join(SELFHOST_DIR, 'supervisor.log');
 let shuttingDown = false;
 const children = new Map<string, ChildProcess>();
 let lockHandle: fsp.FileHandle | null = null;
+let tailscaleTimer: NodeJS.Timeout | null = null;
+let tailscaleCheckRunning = false;
 
 async function appendSupervisor(message: string): Promise<void> {
   await fsp.mkdir(SELFHOST_DIR, { recursive: true, mode: 0o700 });
@@ -101,6 +104,107 @@ function startManaged(name: 'gateway' | 'device'): void {
   });
 }
 
+function runTailscale(args: string[]): { ok: boolean; stdout: string; stderr: string } {
+  const exe = path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Tailscale', 'tailscale.exe');
+  const result = spawnSync(exe, args, {
+    windowsHide: true,
+    encoding: 'utf8'
+  });
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? ''
+  };
+}
+
+async function ensureTailscaleFunnel(): Promise<void> {
+  if (process.platform !== 'win32' || shuttingDown || tailscaleCheckRunning) return;
+  tailscaleCheckRunning = true;
+
+  try {
+    const runtime = await loadRuntimeConfig();
+    if (!runtime.publicBaseUrl) return;
+
+    const publicUrl = new URL(runtime.publicBaseUrl);
+    if (!publicUrl.hostname.endsWith('.ts.net')) return;
+
+    const port = runtime.port ?? 8787;
+    let status = runTailscale(['status', '--json']);
+    let backendState = '';
+
+    if (status.ok) {
+      try {
+        backendState = JSON.parse(status.stdout)?.BackendState ?? '';
+      } catch {}
+    }
+
+    if (backendState !== 'Running') {
+      const ipnPath = path.join(
+        process.env.ProgramFiles ?? 'C:\\Program Files',
+        'Tailscale',
+        'tailscale-ipn.exe'
+      );
+      if (fs.existsSync(ipnPath)) {
+        const ipn = spawn(ipnPath, [], {
+          detached: true,
+          windowsHide: true,
+          stdio: 'ignore'
+        });
+        ipn.unref();
+        await appendSupervisor(
+          `tailscale backend state=${backendState || 'unknown'}; launched tailscale-ipn for recovery`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        status = runTailscale(['status', '--json']);
+        if (status.ok) {
+          try {
+            backendState = JSON.parse(status.stdout)?.BackendState ?? '';
+          } catch {}
+        }
+      }
+    }
+
+    if (backendState !== 'Running') {
+      await appendSupervisor(
+        `tailscale auto-heal deferred: backend state=${backendState || 'unknown'} stderr=${status.stderr.trim()}`
+      );
+      return;
+    }
+
+    const funnelStatus = runTailscale(['funnel', 'status', '--json']);
+    let funnelConfig: any = null;
+    if (funnelStatus.ok && funnelStatus.stdout.trim()) {
+      try {
+        funnelConfig = JSON.parse(funnelStatus.stdout);
+      } catch {}
+    }
+
+    const hostKey = `${publicUrl.hostname}:443`;
+    const expectedProxy = `http://127.0.0.1:${port}`;
+    const actualProxy = funnelConfig?.Web?.[hostKey]?.Handlers?.['/']?.Proxy;
+    const allowed = funnelConfig?.AllowFunnel?.[hostKey] === true;
+
+    if (actualProxy !== expectedProxy || !allowed) {
+      const repair = runTailscale(['funnel', '--bg', '--yes', String(port)]);
+      if (repair.ok) {
+        await appendSupervisor(
+          `tailscale funnel repaired host=${publicUrl.hostname} proxy=${expectedProxy}`
+        );
+      } else {
+        await appendSupervisor(
+          `tailscale funnel repair failed: ${repair.stderr.trim() || repair.stdout.trim()}`
+        );
+      }
+    }
+  } catch (error) {
+    await appendSupervisor(
+      `tailscale auto-heal error: ${error instanceof Error ? error.message : String(error)}`
+    );
+  } finally {
+    tailscaleCheckRunning = false;
+  }
+}
+
 async function stopChildren(): Promise<void> {
   const active = [...children.entries()];
   for (const [, child] of active) {
@@ -123,6 +227,10 @@ async function stopChildren(): Promise<void> {
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (tailscaleTimer) {
+    clearInterval(tailscaleTimer);
+    tailscaleTimer = null;
+  }
   await appendSupervisor(`shutdown requested signal=${signal}`);
   await stopChildren();
   await releaseLock();
@@ -133,6 +241,12 @@ async function main(): Promise<void> {
   await appendSupervisor(`supervisor started pid=${process.pid}`);
   startManaged('gateway');
   startManaged('device');
+
+  setTimeout(() => void ensureTailscaleFunnel(), 2_000);
+  tailscaleTimer = setInterval(() => {
+    void ensureTailscaleFunnel();
+  }, 60_000);
+  tailscaleTimer.unref();
 
   process.once('SIGINT', () => {
     void shutdown('SIGINT').finally(() => process.exit(0));

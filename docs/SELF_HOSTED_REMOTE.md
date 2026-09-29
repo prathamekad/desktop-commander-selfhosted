@@ -145,7 +145,11 @@ npm run selfhost:install-windows
 ```
 
 This starts a hidden supervisor at logon. The supervisor keeps both the gateway and
-device agent running and restarts either child after a crash. Remove it with:
+device agent running and restarts either child after a crash. When the configured public
+origin is a Tailscale `*.ts.net` URL, it also checks Tailscale health every minute: if the
+Windows backend falls out of `Running`, it launches the Tailscale IPN client to recover the
+active tailnet session; if the Funnel mapping disappears, it reapplies only the configured
+loopback MCP port. Remove the launcher with:
 
 ```powershell
 npm run selfhost:uninstall-windows
