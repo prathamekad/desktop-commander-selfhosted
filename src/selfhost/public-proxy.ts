@@ -104,6 +104,8 @@ async function main(): Promise<void> {
     signingSecret: oauthSigningSecret,
     redirectUris: [
       'https://claude.ai/api/mcp/auth_callback',
+      'https://chatgpt.com/connector_platform_oauth_redirect',
+      ...(runtime.oauthRedirectUris ?? []),
       ...(process.env.SELFHOST_OAUTH_REDIRECT_URIS ?? '')
         .split(',')
         .map((value) => value.trim())

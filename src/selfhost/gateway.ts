@@ -370,7 +370,16 @@ class PersonalRouter {
         }
       };
     }
-    return { ...tool, inputSchema: schema };
+    const securitySchemes = [{ type: 'oauth2', scopes: ['mcp:tools'] }];
+    return {
+      ...tool,
+      inputSchema: schema,
+      securitySchemes,
+      _meta: {
+        ...(tool._meta ?? {}),
+        securitySchemes
+      }
+    };
   }
 
   private callTimeoutMs(): number {
@@ -498,7 +507,11 @@ function createMcpServer(router: PersonalRouter): Server {
         name: 'selfhost_list_devices',
         description: 'List personal devices registered with this self-hosted Desktop Commander gateway.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-        annotations: { readOnlyHint: true }
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
+        _meta: {
+          securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }]
+        }
       },
       ...router.listTools()
     ] as any
@@ -543,6 +556,7 @@ export async function startGateway(): Promise<void> {
   const publicBase = publicBaseRaw ? new URL(publicBaseRaw).origin : null;
   const oauthRedirectUris = [
     'https://claude.ai/api/mcp/auth_callback',
+    ...(runtimeConfig.oauthRedirectUris ?? []),
     ...(process.env.SELFHOST_OAUTH_REDIRECT_URIS ?? '')
       .split(',')
       .map((value) => value.trim())

@@ -9,6 +9,7 @@ export interface SelfHostRuntimeConfig {
   port?: number;
   publicPort?: number;
   allowedRoots?: string[];
+  oauthRedirectUris?: string[];
 }
 
 export const RUNTIME_CONFIG_PATH = path.join(SELFHOST_DIR, 'runtime.json');

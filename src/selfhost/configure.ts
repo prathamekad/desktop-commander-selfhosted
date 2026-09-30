@@ -20,6 +20,7 @@ const host = valueAfter('--host');
 const portRaw = valueAfter('--port');
 const publicPortRaw = valueAfter('--public-port');
 const allowedRoots = valuesAfter('--allowed-root');
+const oauthRedirectUris = valuesAfter('--oauth-redirect-uri');
 
 const current = await loadRuntimeConfig();
 
@@ -47,6 +48,11 @@ if (publicPortRaw) {
 }
 if (allowedRoots.length > 0) {
   current.allowedRoots = [...new Set(allowedRoots)];
+}
+if (oauthRedirectUris.length > 0) {
+  current.oauthRedirectUris = [...new Set(
+    oauthRedirectUris.map((value) => new URL(value).toString())
+  )];
 }
 
 await saveRuntimeConfig(current);

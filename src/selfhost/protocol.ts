@@ -5,6 +5,8 @@ export interface DeviceTool {
   description?: string;
   inputSchema: JsonObject;
   annotations?: JsonObject;
+  securitySchemes?: JsonObject[];
+  _meta?: JsonObject;
 }
 
 export interface DeviceRegistration {
