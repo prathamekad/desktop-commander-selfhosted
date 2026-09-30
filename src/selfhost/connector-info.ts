@@ -8,7 +8,7 @@ if (!secrets?.oauthClientId || !secrets?.oauthClientSecret) {
   throw new Error('OAuth credentials are missing. Run npm run selfhost:init.');
 }
 
-console.log('Desktop Commander Self-Hosted connector');
+console.log('SETU connector');
 console.log('');
 if (runtime.publicBaseUrl) {
   console.log('MCP URL:             ' + runtime.publicBaseUrl.replace(/\/$/, '') + '/mcp');

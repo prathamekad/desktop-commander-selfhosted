@@ -12,11 +12,14 @@ const startupDir = path.join(
   process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'),
   'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
 );
-const launcherPath = path.join(startupDir, 'DesktopCommanderSelfhost.vbs');
-const programsDir = path.join(
+const launcherPath = path.join(startupDir, 'SETU.vbs');
+const legacyLauncherPath = path.join(startupDir, 'DesktopCommanderSelfhost.vbs');
+const startMenuPrograms = path.join(
   process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'),
-  'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Desktop Commander Selfhost'
+  'Microsoft', 'Windows', 'Start Menu', 'Programs'
 );
+const programsDir = path.join(startMenuPrograms, 'SETU');
+const legacyProgramsDir = path.join(startMenuPrograms, 'Desktop Commander Selfhost');
 const controlPath = path.join(__dirname, 'control.js');
 const openDashboardPath = path.join(__dirname, 'open-dashboard.js');
 const lockPath = path.join(SELFHOST_DIR, 'supervisor.lock');
@@ -37,17 +40,20 @@ async function stopExisting(): Promise<void> {
 
 async function remove(): Promise<void> {
   await fs.rm(launcherPath, { force: true });
+  await fs.rm(legacyLauncherPath, { force: true });
   await fs.rm(programsDir, { recursive: true, force: true });
+  await fs.rm(legacyProgramsDir, { recursive: true, force: true });
   await stopExisting();
-  console.log('Removed Windows Startup launcher and Start Menu controls.');
+  console.log('Removed SETU Windows Startup launcher and Start Menu controls.');
 }
 
 async function installStartMenuControls(): Promise<void> {
+  await fs.rm(legacyProgramsDir, { recursive: true, force: true });
   await fs.mkdir(programsDir, { recursive: true });
   const actions = ['start', 'status', 'restart', 'stop'] as const;
   for (const action of actions) {
     const label = action.charAt(0).toUpperCase() + action.slice(1);
-    const commandFile = path.join(programsDir, `Desktop Commander Selfhost - ${label}.cmd`);
+    const commandFile = path.join(programsDir, `SETU - ${label}.cmd`);
     const body = [
       '@echo off',
       `"${process.execPath}" "${controlPath}" ${action}`,
@@ -60,7 +66,7 @@ async function installStartMenuControls(): Promise<void> {
 
   const dashboardCommand = path.join(
     programsDir,
-    'Desktop Commander Selfhost - Usage Dashboard.cmd'
+    'SETU - Usage Dashboard.cmd'
   );
   await fs.writeFile(
     dashboardCommand,
@@ -75,6 +81,7 @@ async function installStartMenuControls(): Promise<void> {
 
 async function install(): Promise<void> {
   await fs.mkdir(startupDir, { recursive: true });
+  await fs.rm(legacyLauncherPath, { force: true });
   const node = process.execPath.replace(/"/g, '""');
   const supervisor = supervisorPath.replace(/"/g, '""');
   const command = `"${node}" "${supervisor}"`;
@@ -87,7 +94,7 @@ async function install(): Promise<void> {
   await installStartMenuControls();
   console.log('Installed current-user Startup launcher:');
   console.log(launcherPath);
-  console.log('Installed Start Menu controls under:');
+  console.log('Installed SETU Start Menu controls under:');
   console.log(programsDir);
 
   await stopExisting();

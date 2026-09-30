@@ -73,7 +73,7 @@ export class PersonalOAuth {
       authorization_servers: [this.config.issuer],
       scopes_supported: ['mcp:tools'],
       bearer_methods_supported: ['header'],
-      resource_name: 'Desktop Commander Self-Hosted'
+      resource_name: 'SETU'
     };
   }
 

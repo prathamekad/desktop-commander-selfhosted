@@ -168,7 +168,7 @@ async function main(): Promise<void> {
     server.once('error', onError);
     server.listen(publicPort, '127.0.0.1', () => {
       server.off('error', onError);
-      console.log('Desktop Commander Self-Hosted Public MCP Proxy');
+      console.log('SETU Public MCP Proxy');
       console.log(`  Public facade: http://127.0.0.1:${publicPort}`);
       console.log(`  Private core:  http://127.0.0.1:${internalPort}`);
       console.log('  Exposed routes: OAuth discovery/token + POST /mcp + health');

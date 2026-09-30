@@ -88,7 +88,7 @@ async function status(): Promise<void> {
   const dashboardPort = Number(process.env.SELFHOST_DASHBOARD_PORT ?? runtime.dashboardPort ?? 8790);
   const dashboardBase = `http://127.0.0.1:${dashboardPort}`;
 
-  console.log('Desktop Commander Selfhost');
+  console.log('SETU');
   console.log(`Supervisor:  ${pid ? `RUNNING (PID ${pid})` : 'STOPPED'}`);
   console.log(`Workspace:   ${runtime.allowedRoots?.join(', ') || 'NOT CONFIGURED'}`);
   console.log(`Public MCP:  ${runtime.publicBaseUrl ? runtime.publicBaseUrl + '/mcp' : 'NOT CONFIGURED'}`);

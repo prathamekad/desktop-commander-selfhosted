@@ -194,7 +194,7 @@ export async function startDashboard(): Promise<void> {
     server.once('error', onError);
     server.listen(dashboardPort, '127.0.0.1', () => {
       server.off('error', onError);
-      console.log('Desktop Commander Selfhost Usage Dashboard');
+      console.log('SETU Usage Dashboard');
       console.log(`  URL:      http://127.0.0.1:${dashboardPort}/usage`);
       console.log(`  Audit:    ${auditPath}`);
       console.log('  Exposure: loopback only');

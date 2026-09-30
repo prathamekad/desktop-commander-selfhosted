@@ -539,7 +539,7 @@ function createMcpServer(router: PersonalRouter, client: string): Server {
     tools: [
       {
         name: 'selfhost_list_devices',
-        description: 'List personal devices registered with this self-hosted Desktop Commander gateway.',
+        description: 'List personal devices registered with SETU, your private self-hosted MCP gateway.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
@@ -888,7 +888,7 @@ export async function startGateway(): Promise<void> {
     listener.once('error', onError);
     listener.listen(port, host, () => {
       listener.off('error', onError);
-      console.log('Desktop Commander Self-Hosted Gateway');
+      console.log('SETU Gateway');
       console.log(`  MCP:     http://${host}:${port}/mcp`);
       console.log(`  Device:  http://${host}:${port}/api/device/*`);
       console.log(`  Auth:    ${allowNoAuth ? 'MCP no-auth on loopback' : oauth ? 'owner bearer + OAuth' : 'owner bearer token'}`);

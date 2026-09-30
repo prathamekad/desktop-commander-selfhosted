@@ -1,8 +1,8 @@
 # Personal Self-Hosted Remote MCP
-# Personal Self-Hosted Remote MCP
+# SETU / सेतु — Personal Self-Hosted Remote MCP
 
-This fork adds a personal-only Remote MCP path that does not depend on the hosted
-Desktop Commander relay.
+SETU is our personal Remote MCP layer. It keeps the mature local Desktop Commander
+execution tools while removing the hosted Desktop Commander relay from the call path.
 
 The goal is simple: keep Desktop Commander's mature local filesystem/process tools,
 but remove SaaS-side call quotas, billing counters, and multi-tenant control-plane
@@ -168,7 +168,7 @@ loopback MCP port. Remove the launcher with:
 npm run selfhost:uninstall-windows
 ```
 
-The installer also creates Start Menu controls under **Desktop Commander Selfhost**:
+The installer also creates Start Menu controls under **SETU**:
 Start, Status, Restart, Stop, and Usage Dashboard. The equivalent service-control terminal commands are:
 
 ```powershell
@@ -191,7 +191,7 @@ Open it with:
 npm run selfhost:dashboard:open
 ```
 
-or use **Desktop Commander Selfhost - Usage Dashboard** from the Windows Start Menu.
+or use **SETU - Usage Dashboard** from the Windows Start Menu.
 
 The dashboard reads the append-only metadata audit ledger directly and does not copy
 tool arguments, command text, file contents, OAuth tokens, or MCP results into the

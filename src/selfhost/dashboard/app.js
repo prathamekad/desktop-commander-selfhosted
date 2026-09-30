@@ -344,7 +344,7 @@ async function refresh() {
     updateTimestamp(data);
 
     document.title =
-      `Desktop Commander Selfhost - ${formatNumber(data.summary.counters.totalCalls)} calls`;
+      `SETU - ${formatNumber(data.summary.counters.totalCalls)} calls`;
   } catch (error) {
     renderDisconnected(error);
   } finally {
