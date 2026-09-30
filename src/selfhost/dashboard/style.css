@@ -1126,3 +1126,130 @@ td {
 @media (max-width: 560px) {
   .client-grid { grid-template-columns: 1fr; }
 }
+
+
+/* Readability pass v2: secondary information must remain readable at normal desktop distance. */
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 17px;
+}
+
+.status-chip {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.eyebrow,
+.card-label,
+.panel-kicker {
+  font-size: 11.5px;
+  font-weight: 760;
+  letter-spacing: .115em;
+}
+
+.subtitle {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.range-control button {
+  font-size: 13.5px;
+}
+
+.instance-copy p:last-child {
+  font-size: 14.5px;
+  line-height: 1.58;
+}
+
+.instance-meta {
+  font-size: 12.5px;
+}
+
+.live-pill {
+  font-size: 12.5px;
+}
+
+.metric-card {
+  min-height: 120px;
+}
+
+.metric-copy > span {
+  font-size: 13.5px;
+}
+
+.metric-copy small {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #90a4ad;
+}
+
+.panel-kicker {
+  color: #4ce8ec;
+}
+
+.panel-head h2 {
+  font-size: 18px;
+}
+
+.panel-total {
+  font-size: 12.5px;
+}
+
+.bar-value {
+  font-size: 12.5px;
+}
+
+.bar-label {
+  font-size: 12px;
+}
+
+.legend-row {
+  font-size: 12.5px;
+}
+
+.donut-core span {
+  font-size: 12px;
+}
+
+.activity-axis,
+.time-axis {
+  font-size: 10.5px;
+}
+
+th {
+  font-size: 11px;
+}
+
+td {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.badge,
+.client-badge {
+  font-size: 11px;
+}
+
+.events-meta {
+  font-size: 12px;
+}
+
+.client-name {
+  font-size: 14px;
+}
+
+.client-detail {
+  font-size: 12.5px;
+}
+
+.client-share {
+  font-size: 11.5px;
+}
+
+.footer {
+  font-size: 11px;
+}
+
+@media (max-width: 1180px) {
+  body { font-size: 16px; }
+}
