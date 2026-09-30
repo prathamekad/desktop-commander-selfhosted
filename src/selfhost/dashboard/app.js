@@ -1,210 +1,278 @@
 const $ = (id) => document.getElementById(id);
+
 let selectedRange = 'all';
 let refreshing = false;
 
 const palette = {
-  successfulRouted: '#39df9a',
-  successfulGatewayLocal: '#3396ff',
-  failedRouted: '#ff6577',
-  failedGatewayLocal: '#ff8d6b',
-  policyRejected: '#f05b74',
-  timeouts: '#f0ad4e',
-  abandonedUnknown: '#a579ff'
+  successfulRouted: '#43dc9d',
+  successfulGatewayLocal: '#4b9dff',
+  failedRouted: '#ff6c7d',
+  failedGatewayLocal: '#ff936a',
+  policyRejected: '#f05d78',
+  timeouts: '#f3b24f',
+  abandonedUnknown: '#9a7cff'
 };
 
-function number(value) {
+const rangeLabels = {
+  today: 'Today',
+  month: 'This month',
+  all: 'All time'
+};
+
+function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value ?? 0));
 }
 
-function pct(value) {
-  const n = Number(value ?? 0);
-  return `${Number.isInteger(n) ? n : n.toFixed(1)}%`;
+function formatPercent(value) {
+  const numeric = Number(value ?? 0);
+  return `${Number.isInteger(numeric) ? numeric : numeric.toFixed(1)}%`;
 }
 
-function duration(value) {
-  if (value == null) return 'Average routed latency —';
-  if (value < 1000) return `Average routed latency ${Math.round(value)} ms`;
-  return `Average routed latency ${(value / 1000).toFixed(2)} s`;
+function formatDuration(value) {
+  if (value == null) return 'Average routed latency --';
+  const numeric = Number(value);
+  if (numeric < 1000) return `Average routed latency ${Math.round(numeric)} ms`;
+  return `Average routed latency ${(numeric / 1000).toFixed(2)} s`;
 }
 
 function setText(id, value) {
   const element = $(id);
-  if (element) element.textContent = value;
+  if (element) element.textContent = String(value);
+}
+
+function createElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = String(text);
+  return element;
 }
 
 function renderStatus(status) {
+  const host = $('statusStrip');
+  host.replaceChildren();
+
   const rows = [
-    ['Home', status.homeOnline, status.homeOnline ? 'online' : 'offline'],
-    ['OAuth', status.oauthEnabled, status.oauthEnabled ? 'enabled' : 'disabled'],
-    ['Public proxy', status.publicProxyHealthy, status.publicProxyHealthy ? 'healthy' : 'unhealthy'],
-    ['Funnel', status.funnelOn, status.funnelOn ? 'on' : 'off']
+    ['Home', Boolean(status.homeOnline), status.homeOnline ? 'online' : 'offline'],
+    ['OAuth', Boolean(status.oauthEnabled), status.oauthEnabled ? 'enabled' : 'disabled'],
+    ['Public proxy', Boolean(status.publicProxyHealthy), status.publicProxyHealthy ? 'healthy' : 'unhealthy'],
+    ['Funnel', Boolean(status.funnelOn), status.funnelOn ? 'on' : 'off']
   ];
 
-  $('statusStrip').innerHTML = '';
-  for (const [name, ok, value] of rows) {
-    const chip = document.createElement('span');
-    chip.className = `status-chip ${ok ? 'ok' : 'bad'}`;
-    chip.textContent = `${name} ${value}`;
-    $('statusStrip').appendChild(chip);
+  for (const [name, ok, state] of rows) {
+    const chip = createElement('span', `status-chip ${ok ? 'ok' : 'bad'}`, `${name} ${state}`);
+    host.appendChild(chip);
   }
 }
 
 function renderMetrics(data) {
-  const c = data.summary.counters;
-  const todayCalls = data.activity.hours.reduce((sum, row) => sum + row.calls, 0);
-  setText('mTotal', number(c.totalCalls));
-  setText('mRouted', number(c.successfulRouted));
-  setText('mGateway', number(c.successfulGatewayLocal));
-  setText('mRejected', number(c.policyRejected));
-  setText('mTimeouts', number(c.timeouts));
-  setText('mAbandoned', number(c.abandonedUnknown));
-  setText('mToday', number(todayCalls));
-  setText('mSuccess', pct(c.successRate));
-  setText('mAvgDuration', duration(c.averageRoutedDurationMs));
-}
+  const counters = data.summary.counters;
+  const todayCalls = data.activity.hours.reduce((sum, row) => sum + Number(row.calls ?? 0), 0);
 
+  setText('mTotal', formatNumber(counters.totalCalls));
+  setText('mRouted', formatNumber(counters.successfulRouted));
+  setText('mGateway', formatNumber(counters.successfulGatewayLocal));
+  setText('mRejected', formatNumber(counters.policyRejected));
+  setText('mTimeouts', formatNumber(counters.timeouts));
+  setText('mAbandoned', formatNumber(counters.abandonedUnknown));
+  setText('mToday', formatNumber(todayCalls));
+  setText('mSuccess', formatPercent(counters.successRate));
+  setText('mAvgDuration', formatDuration(counters.averageRoutedDurationMs));
+}
 function renderToolChart(data) {
   const host = $('toolChart');
-  host.innerHTML = '';
+  host.replaceChildren();
+
   const rows = data.tools.tools.slice(0, 8);
-  const total = rows.reduce((sum, row) => sum + row.calls, 0);
-  setText('toolTotal', `${number(total)} calls`);
+  setText('toolTotal', `${formatNumber(data.summary.counters.totalCalls)} calls`);
 
   if (rows.length === 0) {
-    host.innerHTML = '<div class="empty">No calls in this range.</div>';
+    host.appendChild(createElement('div', 'empty', 'No calls in this range.'));
     return;
   }
 
-  const max = Math.max(...rows.map((row) => row.calls), 1);
+  const max = Math.max(...rows.map((row) => Number(row.calls ?? 0)), 1);
+
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'bar-item';
+    const item = createElement('div', 'bar-item');
+    const value = createElement('div', 'bar-value', formatNumber(row.calls));
+    const track = createElement('div', 'bar-track');
+    const bar = createElement('div', 'bar');
+    const label = createElement('div', 'bar-label', row.toolName);
 
-    const value = document.createElement('div');
-    value.className = 'bar-value';
-    value.textContent = number(row.calls);
-
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    bar.style.height = `${Math.max(3, (row.calls / max) * 185)}px`;
-    bar.title = `${row.toolName}: ${row.calls} calls`;
-
-    const label = document.createElement('div');
-    label.className = 'bar-label';
-    label.textContent = row.toolName;
+    const height = Math.max(2, (Number(row.calls ?? 0) / max) * 185);
+    bar.style.height = `${height}px`;
+    bar.title = `${row.toolName}: ${formatNumber(row.calls)} calls`;
     label.title = row.toolName;
 
-    item.append(value, bar, label);
+    track.appendChild(bar);
+    item.append(value, track, label);
     host.appendChild(item);
   }
 }
 
 function renderCallMix(data) {
-  const c = data.summary.counters;
+  const counters = data.summary.counters;
   const rows = [
-    ['Successful routed', c.successfulRouted, 'successfulRouted'],
-    ['Gateway-local', c.successfulGatewayLocal, 'successfulGatewayLocal'],
-    ['Failed routed', c.failedRouted, 'failedRouted'],
-    ['Failed gateway-local', c.failedGatewayLocal, 'failedGatewayLocal'],
-    ['Policy rejected', c.policyRejected, 'policyRejected'],
-    ['Timeouts', c.timeouts, 'timeouts'],
-    ['Abandoned / unknown', c.abandonedUnknown, 'abandonedUnknown']
+    ['Successful routed', counters.successfulRouted, 'successfulRouted'],
+    ['Gateway-local', counters.successfulGatewayLocal, 'successfulGatewayLocal'],
+    ['Failed routed', counters.failedRouted, 'failedRouted'],
+    ['Failed gateway-local', counters.failedGatewayLocal, 'failedGatewayLocal'],
+    ['Policy rejected', counters.policyRejected, 'policyRejected'],
+    ['Timeouts', counters.timeouts, 'timeouts'],
+    ['Abandoned / unknown', counters.abandonedUnknown, 'abandonedUnknown']
   ];
-  const total = c.totalCalls;
-  setText('mixTotal', `${number(total)} calls`);
-  setText('donutTotal', number(total));
+
+  const total = Number(counters.totalCalls ?? 0);
+  setText('mixTotal', `${formatNumber(total)} calls`);
+  setText('donutTotal', formatNumber(total));
 
   let cursor = 0;
-  const pieces = [];
-  for (const [, value, key] of rows) {
-    if (!value || total === 0) continue;
+  const slices = [];
+  for (const [, rawValue, key] of rows) {
+    const value = Number(rawValue ?? 0);
+    if (value <= 0 || total <= 0) continue;
     const start = cursor;
     cursor += (value / total) * 100;
-    pieces.push(`${palette[key]} ${start}% ${cursor}%`);
+    slices.push(`${palette[key]} ${start.toFixed(3)}% ${cursor.toFixed(3)}%`);
   }
-  $('callDonut').style.background = pieces.length
-    ? `conic-gradient(${pieces.join(',')})`
-    : 'rgba(126,190,219,.14)';
+
+  $('callDonut').style.background = slices.length
+    ? `conic-gradient(${slices.join(', ')})`
+    : 'rgba(121, 174, 195, .11)';
 
   const legend = $('callLegend');
-  legend.innerHTML = '';
-  for (const [label, value, key] of rows) {
-    const line = document.createElement('div');
-    line.className = 'legend-row';
+  legend.replaceChildren();
+
+  for (const [label, rawValue, key] of rows) {
+    const value = Number(rawValue ?? 0);
     const share = total === 0 ? 0 : (value / total) * 100;
-    line.innerHTML =
-      `<span class="legend-swatch" style="background:${palette[key]}"></span>`
-      + `<span>${label}</span><span class="legend-value">${number(value)} · ${Math.round(share)}%</span>`;
+
+    const line = createElement('div', 'legend-row');
+    const swatch = createElement('span', 'legend-swatch');
+    swatch.style.background = palette[key];
+    const name = createElement('span', '', label);
+    const count = createElement(
+      'span',
+      'legend-value',
+      `${formatNumber(value)} / ${Math.round(share)}%`
+    );
+
+    line.append(swatch, name, count);
     legend.appendChild(line);
   }
 }
-
 function renderActivity(data) {
   const host = $('activityChart');
-  host.innerHTML = '';
+  host.replaceChildren();
+
   const rows = data.activity.hours;
-  const total = rows.reduce((sum, row) => sum + row.calls, 0);
-  const max = Math.max(...rows.map((row) => row.calls), 1);
-  setText('todayTotal', `${number(total)} calls`);
+  const total = rows.reduce((sum, row) => sum + Number(row.calls ?? 0), 0);
+  const max = Math.max(...rows.map((row) => Number(row.calls ?? 0)), 1);
+
+  setText('todayTotal', `${formatNumber(total)} calls`);
+
+  const axisLabels = document.querySelectorAll('.activity-axis span');
+  if (axisLabels.length === 3) {
+    axisLabels[0].textContent = formatNumber(max);
+    axisLabels[1].textContent = formatNumber(Math.ceil(max / 2));
+    axisLabels[2].textContent = '0';
+  }
 
   for (const row of rows) {
-    const bar = document.createElement('div');
-    bar.className = 'hour-bar';
-    bar.style.height = `${Math.max(2, (row.calls / max) * 185)}px`;
-    bar.style.opacity = row.calls === 0 ? '.2' : '1';
-    bar.dataset.tip = `${row.label} · ${row.calls} calls`;
+    const calls = Number(row.calls ?? 0);
+    const bar = createElement('div', 'hour-bar');
+    bar.style.height = `${Math.max(2, (calls / max) * 185)}px`;
+    bar.style.opacity = calls === 0 ? '.16' : '1';
+    bar.dataset.tip = `${row.label}: ${formatNumber(calls)} calls`;
     host.appendChild(bar);
   }
 }
 
+function humanizeReason(reason) {
+  return String(reason ?? '')
+    .replaceAll('_', ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function eventDetail(event) {
-  if (event.reason) return event.reason.replaceAll('_', ' ');
+  if (event.reason) return humanizeReason(event.reason);
   if (event.deviceName) return event.deviceName;
-  if (event.deviceId) return event.deviceId.slice(0, 12) + '…';
+  if (event.deviceId) return `${event.deviceId.slice(0, 12)}...`;
   return event.callType === 'gateway-local' ? 'Gateway' : 'Home';
+}
+
+function appendCell(row, text, className = '') {
+  const cell = createElement('td', className, text);
+  row.appendChild(cell);
+  return cell;
 }
 
 function renderEvents(data) {
   const body = $('eventsBody');
-  body.innerHTML = '';
+  body.replaceChildren();
+
   const events = data.events.events;
   setText('eventCount', `${events.length} latest`);
 
   if (events.length === 0) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">No audit events yet.</td></tr>';
+    const row = document.createElement('tr');
+    const cell = createElement('td', 'empty', 'No audit events yet.');
+    cell.colSpan = 6;
+    row.appendChild(cell);
+    body.appendChild(row);
     return;
   }
 
   for (const event of events) {
     const row = document.createElement('tr');
     const when = new Date(event.ts);
-    const latency = event.durationMs == null ? '—' : `${event.durationMs} ms`;
+    const latency = event.durationMs == null ? '--' : `${formatNumber(event.durationMs)} ms`;
     const callType = event.callType === 'gateway-local' ? 'Gateway-local' : 'Routed device';
-    row.innerHTML =
-      `<td>${when.toLocaleString()}</td>`
-      + `<td class="tool-name"></td>`
-      + `<td><span class="badge ${event.outcome}">${event.outcome}</span></td>`
-      + `<td>${callType}</td>`
-      + `<td>${eventDetail(event)}</td>`
-      + `<td>${latency}</td>`;
-    row.querySelector('.tool-name').textContent = event.toolName;
+
+    appendCell(row, when.toLocaleString());
+    appendCell(row, event.toolName, 'tool-name');
+
+    const statusCell = document.createElement('td');
+    statusCell.appendChild(createElement('span', `badge ${event.outcome}`, event.outcome));
+    row.appendChild(statusCell);
+
+    appendCell(row, callType, 'call-type');
+    appendCell(row, eventDetail(event));
+    appendCell(row, latency);
+
     body.appendChild(row);
   }
 }
-
 function updateTimestamp(data) {
-  const when = new Date(data.generatedAt);
-  setText('lastUpdated', `Updated ${when.toLocaleTimeString()} · ${data.summary.timezone}`);
+  const generated = new Date(data.generatedAt);
+  const timezone = data.summary.timezone || 'local';
+  setText('lastUpdated', `Updated ${generated.toLocaleTimeString()} / ${timezone}`);
+  setText('footerRange', `${rangeLabels[selectedRange]} view`);
+}
+
+function renderDisconnected(error) {
+  console.error(error);
+  setText('lastUpdated', 'Dashboard backend unavailable');
+
+  const strip = $('statusStrip');
+  strip.replaceChildren(createElement('span', 'status-chip bad', 'Dashboard disconnected'));
 }
 
 async function refresh() {
   if (refreshing) return;
   refreshing = true;
+
   try {
-    const response = await fetch(`/api/dashboard?range=${encodeURIComponent(selectedRange)}`, {
-      cache: 'no-store'
-    });
-    if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
+    const response = await fetch(
+      `/api/dashboard?range=${encodeURIComponent(selectedRange)}`,
+      { cache: 'no-store' }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Dashboard API returned ${response.status}`);
+    }
+
     const data = await response.json();
     renderStatus(data.status);
     renderMetrics(data);
@@ -213,12 +281,11 @@ async function refresh() {
     renderActivity(data);
     renderEvents(data);
     updateTimestamp(data);
-    document.title = `Desktop Commander Selfhost — ${data.summary.counters.totalCalls} calls`;
+
+    document.title =
+      `Desktop Commander Selfhost - ${formatNumber(data.summary.counters.totalCalls)} calls`;
   } catch (error) {
-    console.error(error);
-    setText('lastUpdated', 'Dashboard backend unavailable');
-    const strip = $('statusStrip');
-    strip.innerHTML = '<span class="status-chip bad">Dashboard disconnected</span>';
+    renderDisconnected(error);
   } finally {
     refreshing = false;
   }
@@ -226,16 +293,19 @@ async function refresh() {
 
 for (const button of document.querySelectorAll('[data-range]')) {
   button.addEventListener('click', () => {
-    selectedRange = button.dataset.range;
-    document.querySelectorAll('[data-range]').forEach((item) =>
-      item.classList.toggle('selected', item === button)
-    );
+    selectedRange = button.dataset.range || 'all';
+
+    for (const item of document.querySelectorAll('[data-range]')) {
+      item.classList.toggle('selected', item === button);
+    }
+
     void refresh();
   });
 }
 
 void refresh();
 setInterval(() => void refresh(), 5000);
+
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void refresh();
 });
