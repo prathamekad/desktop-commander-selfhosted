@@ -96,11 +96,53 @@ button, input, select { font: inherit; }
     linear-gradient(145deg, rgba(42, 217, 223, .15), rgba(75, 157, 255, .06));
   box-shadow: inset 0 0 20px rgba(42, 217, 223, .05);
 }
-.logo-mark span {
-  color: #bffaff;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: .06em;
+.setu-gateway-logo {
+  --setu-logo-size: 26px;
+  width: var(--setu-logo-size);
+  height: var(--setu-logo-size);
+  display: block;
+  position: relative;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 50% 64%, rgba(42, 217, 223, .24), transparent 46%),
+    linear-gradient(180deg, rgba(14, 38, 50, .94), rgba(5, 16, 24, .98));
+  box-shadow:
+    inset 0 0 0 1px rgba(84, 225, 233, .18),
+    0 0 18px rgba(42, 217, 223, .08);
+  overflow: hidden;
+}
+
+.setu-gateway-logo::before {
+  content: "";
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  top: 18%;
+  height: 50%;
+  border: 3px solid transparent;
+  border-top-color: #67f0ec;
+  border-left-color: #35dce5;
+  border-right-color: #35dce5;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  filter: drop-shadow(0 0 5px rgba(42, 217, 223, .32));
+}
+
+.setu-gateway-logo::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 8%;
+  height: 42%;
+  clip-path: polygon(39% 0, 61% 0, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, rgba(62, 229, 231, .92), rgba(45, 125, 234, .94));
+  box-shadow: 0 0 12px rgba(56, 173, 239, .32);
+}
+
+.setu-gateway-logo--small {
+  --setu-logo-size: 29px;
+  flex: 0 0 auto;
 }
 
 .rail-nav {
@@ -175,26 +217,10 @@ button, input, select { font: inherit; }
   white-space: nowrap;
   font-size: 15px;
 }
-.product-id strong { font-weight: 760; letter-spacing: -.015em; }
-.product-accent { margin-left: 6px; color: var(--cyan); font-weight: 700; }
-
-.product-symbol {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-items: end;
-  gap: 3px;
+.product-id strong {
+  font-weight: 760;
+  letter-spacing: .045em;
 }
-.product-symbol span {
-  display: block;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #9df8f3, var(--cyan));
-  box-shadow: 0 0 12px rgba(42, 217, 223, .2);
-}
-.product-symbol span:nth-child(1) { height: 12px; }
-.product-symbol span:nth-child(2) { height: 20px; }
-.product-symbol span:nth-child(3) { height: 16px; }
 
 .status-strip {
   display: flex;
