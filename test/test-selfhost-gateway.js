@@ -96,6 +96,13 @@ try {
           type: 'object',
           properties: { value: { type: 'string' } },
           required: ['value']
+        },
+        _meta: {
+          'ui/resourceUri': 'ui://desktop-commander/file-preview',
+          'openai/outputTemplate': 'ui://desktop-commander/file-preview',
+          'openai/widgetAccessible': true,
+          ui: { resourceUri: 'ui://desktop-commander/file-preview' },
+          customMarker: 'keep-me'
         }
       },
       {
@@ -151,6 +158,15 @@ try {
   assert.ok(listed.tools.some((tool) => tool.name === 'selfhost_list_devices'));
   assert.ok(listed.tools.some((tool) => tool.name === 'start_process'));
   assert.equal(listed.tools.some((tool) => tool.name === 'set_config_value'), false);
+
+  const echoTool = listed.tools.find((tool) => tool.name === 'echo_selfhost_test');
+  assert.ok(echoTool);
+  assert.equal(echoTool._meta?.['ui/resourceUri'], undefined);
+  assert.equal(echoTool._meta?.['openai/outputTemplate'], undefined);
+  assert.equal(echoTool._meta?.['openai/widgetAccessible'], undefined);
+  assert.equal(echoTool._meta?.ui, undefined);
+  assert.equal(echoTool._meta?.customMarker, 'keep-me');
+  assert.deepEqual(echoTool._meta?.securitySchemes, [{ type: 'oauth2', scopes: ['mcp:tools'] }]);
 
   const devices = await client.callTool({
     name: 'selfhost_list_devices',

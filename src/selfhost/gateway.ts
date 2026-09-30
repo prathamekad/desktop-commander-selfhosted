@@ -394,12 +394,18 @@ class PersonalRouter {
       };
     }
     const securitySchemes = [{ type: 'oauth2', scopes: ['mcp:tools'] }];
+    const remoteMeta = { ...(tool._meta ?? {}) };
+    delete remoteMeta['ui/resourceUri'];
+    delete remoteMeta['openai/outputTemplate'];
+    delete remoteMeta['openai/widgetAccessible'];
+    delete remoteMeta.ui;
+
     return {
       ...tool,
       inputSchema: schema,
       securitySchemes,
       _meta: {
-        ...(tool._meta ?? {}),
+        ...remoteMeta,
         securitySchemes
       }
     };
