@@ -17,6 +17,11 @@ import {
 } from './policy.js';
 import { loadRuntimeConfig } from './runtime-config.js';
 import {
+  parseUsageLimit,
+  parseUsageRange,
+  UsageAnalyticsService
+} from './usage-analytics.js';
+import {
   DEFAULT_CALL_TIMEOUT_MS,
   DEVICE_STALE_MS,
   DeviceRegistration,
@@ -610,6 +615,7 @@ export async function startGateway(): Promise<void> {
     );
   }
   const router = new PersonalRouter(auditPath, allowedRoots);
+  const usageAnalytics = new UsageAnalyticsService(auditPath);
   await router.initialize();
   let shuttingDown = false;
 
@@ -759,6 +765,41 @@ export async function startGateway(): Promise<void> {
         sendJson(res, 200, { devices: router.listDevices() });
         return;
       }
+
+      if (url.pathname.startsWith('/api/usage/')) {
+        if (!authorized(req, ownerToken, allowNoAuth)) {
+          sendJson(res, 401, { error: 'unauthorized' });
+          return;
+        }
+        if (method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' });
+          return;
+        }
+
+        const range = parseUsageRange(url.searchParams.get('range'));
+        if (url.pathname === '/api/usage/summary') {
+          sendJson(res, 200, await usageAnalytics.summary(range));
+          return;
+        }
+        if (url.pathname === '/api/usage/tools') {
+          const limit = parseUsageLimit(url.searchParams.get('limit'), 25);
+          sendJson(res, 200, await usageAnalytics.tools(range, limit));
+          return;
+        }
+        if (url.pathname === '/api/usage/activity') {
+          sendJson(res, 200, await usageAnalytics.activity(range));
+          return;
+        }
+        if (url.pathname === '/api/usage/events') {
+          const limit = parseUsageLimit(url.searchParams.get('limit'), 50);
+          sendJson(res, 200, await usageAnalytics.recentEvents(limit));
+          return;
+        }
+
+        sendJson(res, 404, { error: 'usage_endpoint_not_found' });
+        return;
+      }
+
       if (url.pathname === '/mcp') {
         if (!authorizedMcp(req, ownerToken, oauth, allowNoAuth)) {
           const headers: Record<string, string> = {};

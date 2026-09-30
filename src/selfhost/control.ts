@@ -85,6 +85,8 @@ async function status(): Promise<void> {
   const pid = await supervisorPid();
   const localBase = `http://127.0.0.1:${runtime.port ?? 8787}`;
   const publicLocalBase = `http://127.0.0.1:${runtime.publicPort ?? 8788}`;
+  const dashboardPort = Number(process.env.SELFHOST_DASHBOARD_PORT ?? runtime.dashboardPort ?? 8790);
+  const dashboardBase = `http://127.0.0.1:${dashboardPort}`;
 
   console.log('Desktop Commander Selfhost');
   console.log(`Supervisor:  ${pid ? `RUNNING (PID ${pid})` : 'STOPPED'}`);
@@ -110,6 +112,15 @@ async function status(): Promise<void> {
     } catch {
       console.log('Public proxy: UNREACHABLE');
     }
+  }
+
+  try {
+    const response = await fetch(`${dashboardBase}/api/healthz`, {
+      signal: AbortSignal.timeout(2_000)
+    });
+    console.log(`Dashboard:   ${response.ok ? 'HEALTHY' : 'UNHEALTHY'} (${dashboardBase}/usage)`);
+  } catch {
+    console.log(`Dashboard:   UNREACHABLE (${dashboardBase}/usage)`);
   }
 
   if (process.platform === 'win32') {

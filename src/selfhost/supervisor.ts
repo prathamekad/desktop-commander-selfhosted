@@ -66,7 +66,7 @@ function logStream(name: string): fs.WriteStream {
   });
 }
 
-function startManaged(name: 'gateway' | 'device' | 'public-proxy'): void {
+function startManaged(name: 'gateway' | 'device' | 'public-proxy' | 'dashboard'): void {
   if (shuttingDown) return;
   const script = path.join(__dirname, `${name}.js`);
   const stdout = logStream(name);
@@ -241,6 +241,7 @@ async function main(): Promise<void> {
   await appendSupervisor(`supervisor started pid=${process.pid}`);
   startManaged('gateway');
   startManaged('device');
+  startManaged('dashboard');
   const runtime = await loadRuntimeConfig();
   if (runtime.publicBaseUrl) startManaged('public-proxy');
 

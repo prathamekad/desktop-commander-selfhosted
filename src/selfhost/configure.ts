@@ -19,6 +19,7 @@ const gatewayUrl = valueAfter('--gateway-url');
 const host = valueAfter('--host');
 const portRaw = valueAfter('--port');
 const publicPortRaw = valueAfter('--public-port');
+const dashboardPortRaw = valueAfter('--dashboard-port');
 const allowedRoots = valuesAfter('--allowed-root');
 const oauthRedirectUris = valuesAfter('--oauth-redirect-uri');
 
@@ -45,6 +46,13 @@ if (publicPortRaw) {
     throw new Error('--public-port must be an integer from 1 to 65535');
   }
   current.publicPort = publicPort;
+}
+if (dashboardPortRaw) {
+  const dashboardPort = Number(dashboardPortRaw);
+  if (!Number.isInteger(dashboardPort) || dashboardPort < 1 || dashboardPort > 65535) {
+    throw new Error('--dashboard-port must be an integer from 1 to 65535');
+  }
+  current.dashboardPort = dashboardPort;
 }
 if (allowedRoots.length > 0) {
   current.allowedRoots = [...new Set(allowedRoots)];

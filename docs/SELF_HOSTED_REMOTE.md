@@ -169,7 +169,7 @@ npm run selfhost:uninstall-windows
 ```
 
 The installer also creates Start Menu controls under **Desktop Commander Selfhost**:
-Start, Status, Restart, and Stop. The equivalent terminal commands are:
+Start, Status, Restart, Stop, and Usage Dashboard. The equivalent service-control terminal commands are:
 
 ```powershell
 npm run selfhost:start
@@ -180,6 +180,39 @@ npm run selfhost:stop
 
 Normal daily use requires none of these commands: signing into Windows starts the
 supervisor automatically.
+
+## Usage analytics
+
+The supervisor also starts a loopback-only usage dashboard on port `8790` by default.
+
+Open it with:
+
+```powershell
+npm run selfhost:dashboard:open
+```
+
+or use **Desktop Commander Selfhost - Usage Dashboard** from the Windows Start Menu.
+
+The dashboard reads the append-only metadata audit ledger directly and does not copy
+tool arguments, command text, file contents, OAuth tokens, or MCP results into the
+analytics store.
+
+Private owner-authenticated usage APIs are also available on the core gateway:
+
+```text
+GET /api/usage/summary?range=today|month|all
+GET /api/usage/tools?range=today|month|all&limit=25
+GET /api/usage/activity?range=today|month|all
+GET /api/usage/events?limit=50
+```
+
+The public OAuth/MCP facade intentionally returns 404 for `/api/usage/*`. The local
+dashboard exposes one combined loopback endpoint, `GET /api/dashboard?range=...`,
+for its UI and `GET /api/healthz` for status checks.
+
+Terminal outcomes are counted once: successful/failed routed completions, gateway-local
+calls, policy rejections, timeouts, and abandoned/unknown calls. Dispatch records are
+not counted as completed tool calls.
 
 ## Multiple personal devices
 
@@ -200,6 +233,7 @@ Use `selfhost_list_devices` to inspect current device IDs and reachability.
 | `SELFHOST_HOST` | gateway | `127.0.0.1` | Bind address |
 | `SELFHOST_PORT` | private gateway | `8787` | Loopback-only core/device port |
 | `SELFHOST_PUBLIC_PORT` | public facade | `8788` | Loopback public-facade port used by the HTTPS tunnel |
+| `SELFHOST_DASHBOARD_PORT` | dashboard | `8790` | Reserved loopback dashboard port; runtime `--dashboard-port` is preferred |
 | `SELFHOST_ALLOWED_ROOTS` | gateway | runtime config | OS-delimiter-separated workspace roots; runtime `--allowed-root` is preferred |
 | `SELFHOST_DEVICE_TOKEN` | both | none | Required device authentication |
 | `SELFHOST_OWNER_TOKEN` | gateway | none | MCP bearer authentication |
@@ -237,6 +271,8 @@ The first working milestone supports:
 - duplicate-delivery protection
 - generated owner/device credentials stored outside the repository
 - metadata-only audit receipts
+- local usage analytics with today/month/all-time aggregation, per-tool counts, hourly activity, recent terminal events, and service health
+- loopback-only usage dashboard; analytics APIs remain private and are not exposed through Funnel
 - restart recovery that marks unresolved calls as abandoned/unknown
 - graceful shutdown that refuses new work and releases waiting requests
 - automatic device re-registration after gateway restart

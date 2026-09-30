@@ -8,6 +8,7 @@ export interface SelfHostRuntimeConfig {
   host?: string;
   port?: number;
   publicPort?: number;
+  dashboardPort?: number;
   allowedRoots?: string[];
   oauthRedirectUris?: string[];
 }

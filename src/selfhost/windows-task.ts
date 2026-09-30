@@ -18,6 +18,7 @@ const programsDir = path.join(
   'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Desktop Commander Selfhost'
 );
 const controlPath = path.join(__dirname, 'control.js');
+const openDashboardPath = path.join(__dirname, 'open-dashboard.js');
 const lockPath = path.join(SELFHOST_DIR, 'supervisor.lock');
 
 if (process.platform !== 'win32') {
@@ -56,6 +57,20 @@ async function installStartMenuControls(): Promise<void> {
     ].join('\r\n');
     await fs.writeFile(commandFile, body, 'utf8');
   }
+
+  const dashboardCommand = path.join(
+    programsDir,
+    'Desktop Commander Selfhost - Usage Dashboard.cmd'
+  );
+  await fs.writeFile(
+    dashboardCommand,
+    [
+      '@echo off',
+      `"${process.execPath}" "${openDashboardPath}"`,
+      ''
+    ].join('\r\n'),
+    'utf8'
+  );
 }
 
 async function install(): Promise<void> {

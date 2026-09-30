@@ -239,6 +239,43 @@ try {
 
   await client.close();
 
+  const unauthorizedUsage = await fetch(`${baseUrl}/api/usage/summary?range=all`);
+  assert.equal(unauthorizedUsage.status, 401);
+
+  const usageSummaryResponse = await fetch(
+    `${baseUrl}/api/usage/summary?range=all`,
+    { headers: { authorization: `Bearer ${ownerToken}` } }
+  );
+  assert.equal(usageSummaryResponse.status, 200);
+  const usageSummary = await usageSummaryResponse.json();
+  assert.ok(usageSummary.counters.totalCalls >= 5);
+  assert.ok(usageSummary.counters.successfulCalls >= 4);
+  assert.ok(usageSummary.counters.failedCalls >= 1);
+
+  const usageToolsResponse = await fetch(
+    `${baseUrl}/api/usage/tools?range=all&limit=10`,
+    { headers: { authorization: `Bearer ${ownerToken}` } }
+  );
+  assert.equal(usageToolsResponse.status, 200);
+  const usageTools = await usageToolsResponse.json();
+  assert.ok(usageTools.tools.some((row) => row.toolName === 'selfhost_list_devices'));
+
+  const usageActivityResponse = await fetch(
+    `${baseUrl}/api/usage/activity?range=today`,
+    { headers: { authorization: `Bearer ${ownerToken}` } }
+  );
+  assert.equal(usageActivityResponse.status, 200);
+  const usageActivity = await usageActivityResponse.json();
+  assert.equal(usageActivity.hours.length, 24);
+
+  const usageEventsResponse = await fetch(
+    `${baseUrl}/api/usage/events?limit=3`,
+    { headers: { authorization: `Bearer ${ownerToken}` } }
+  );
+  assert.equal(usageEventsResponse.status, 200);
+  const usageEvents = await usageEventsResponse.json();
+  assert.equal(usageEvents.events.length, 3);
+
   const audit = await fs.readFile(auditPath, 'utf8');
   assert.match(audit, /tool_dispatched/);
   assert.match(audit, /tool_completed/);

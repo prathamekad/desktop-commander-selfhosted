@@ -100,6 +100,9 @@ try {
   const devicesApi = await fetch(`http://127.0.0.1:${publicPort}/api/devices`);
   assert.equal(devicesApi.status, 404);
 
+  const usageApi = await fetch(`http://127.0.0.1:${publicPort}/api/usage/summary`);
+  assert.equal(usageApi.status, 404);
+
   const internalDeviceHits = seen.filter(({ url }) =>
     url?.startsWith('/api/device') || url === '/api/devices'
   );
