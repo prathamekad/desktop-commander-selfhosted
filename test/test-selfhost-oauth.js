@@ -8,7 +8,10 @@ const oauth = new PersonalOAuth({
   clientId: 'client-test',
   clientSecret: 'secret-test',
   signingSecret: 'signing-secret-test',
-  redirectUris: ['https://claude.ai/api/mcp/auth_callback']
+  redirectUris: [
+    'https://claude.ai/api/mcp/auth_callback',
+    'https://chatgpt.com/connector_platform_oauth_redirect'
+  ]
 });
 
 const verifier = crypto.randomBytes(32).toString('base64url');
@@ -46,7 +49,9 @@ const tokens = oauth.exchangeAuthorizationCode(exchange, basic);
 assert.equal(tokens.token_type, 'Bearer');
 assert.ok(tokens.access_token);
 assert.ok(tokens.refresh_token);
-assert.ok(oauth.verifyAccessToken(tokens.access_token));
+const claudeAccess = oauth.verifyAccessToken(tokens.access_token);
+assert.ok(claudeAccess);
+assert.equal(claudeAccess.connector, 'claude');
 
 assert.throws(() => oauth.exchangeAuthorizationCode(exchange, basic), /invalid_grant/);
 
@@ -56,7 +61,24 @@ const refresh = new URLSearchParams({
 });
 const refreshed = oauth.refresh(refresh, basic);
 assert.ok(refreshed.access_token);
-assert.ok(oauth.verifyAccessToken(refreshed.access_token));
+const refreshedAccess = oauth.verifyAccessToken(refreshed.access_token);
+assert.ok(refreshedAccess);
+assert.equal(refreshedAccess.connector, 'claude');
+
+const chatgptVerifier = crypto.randomBytes(32).toString('base64url');
+const chatgptChallenge = crypto.createHash('sha256').update(chatgptVerifier).digest('base64url');
+const chatgptAuthorize = new URLSearchParams(authorize);
+chatgptAuthorize.set('redirect_uri', 'https://chatgpt.com/connector_platform_oauth_redirect');
+chatgptAuthorize.set('code_challenge', chatgptChallenge);
+const chatgptRedirect = new URL(oauth.authorize(chatgptAuthorize));
+const chatgptExchange = new URLSearchParams(exchange);
+chatgptExchange.set('code', chatgptRedirect.searchParams.get('code'));
+chatgptExchange.set('redirect_uri', 'https://chatgpt.com/connector_platform_oauth_redirect');
+chatgptExchange.set('code_verifier', chatgptVerifier);
+const chatgptTokens = oauth.exchangeAuthorizationCode(chatgptExchange, basic);
+const chatgptAccess = oauth.verifyAccessToken(chatgptTokens.access_token);
+assert.ok(chatgptAccess);
+assert.equal(chatgptAccess.connector, 'chatgpt');
 
 const badRedirect = new URLSearchParams(authorize);
 badRedirect.set('redirect_uri', 'https://attacker.example/callback');

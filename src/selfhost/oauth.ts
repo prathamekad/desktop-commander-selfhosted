@@ -15,14 +15,18 @@ interface AuthorizationCodeRecord {
   codeChallenge: string;
   scope: string;
   resource: string;
+  connector: OAuthConnector;
   expiresAt: number;
 }
 
-interface TokenPayload {
+export type OAuthConnector = 'chatgpt' | 'claude' | 'other' | 'unknown';
+
+export interface TokenPayload {
   typ: 'access' | 'refresh';
   clientId: string;
   resource: string;
   scope: string;
+  connector?: OAuthConnector;
   iat: number;
   exp: number;
   jti: string;
@@ -45,6 +49,17 @@ function safeEqual(a: string, b: string): boolean {
 
 function normalizeUrl(value: string): string {
   return new URL(value).toString();
+}
+
+function connectorFromRedirectUri(value: string): OAuthConnector {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (host === 'chatgpt.com' || host.endsWith('.chatgpt.com')) return 'chatgpt';
+    if (host === 'claude.ai' || host.endsWith('.claude.ai')) return 'claude';
+    return 'other';
+  } catch {
+    return 'unknown';
+  }
 }
 
 export class PersonalOAuth {
@@ -114,6 +129,7 @@ export class PersonalOAuth {
       codeChallenge,
       scope: 'mcp:tools',
       resource: this.config.resource,
+      connector: connectorFromRedirectUri(redirectUri),
       expiresAt: Date.now() + CODE_TTL_MS
     });
     this.sweepCodes();
@@ -146,7 +162,7 @@ export class PersonalOAuth {
     const actualChallenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     if (!safeEqual(actualChallenge, record.codeChallenge)) throw new OAuthRequestError('invalid_grant');
 
-    return this.issueTokenPair(record.scope, record.resource);
+    return this.issueTokenPair(record.scope, record.resource, record.connector);
   }
 
   refresh(form: URLSearchParams, authHeader?: string): Record<string, unknown> {
@@ -161,19 +177,24 @@ export class PersonalOAuth {
     if (scope.split(/\s+/).some((item) => item !== 'mcp:tools')) {
       throw new OAuthRequestError('invalid_scope');
     }
-    return this.issueTokenPair(scope, payload.resource);
+    return this.issueTokenPair(scope, payload.resource, payload.connector ?? 'unknown');
   }
   verifyAccessToken(token: string): TokenPayload | null {
     return this.verifyToken(token, 'access');
   }
 
-  private issueTokenPair(scope: string, resource: string): Record<string, unknown> {
+  private issueTokenPair(
+    scope: string,
+    resource: string,
+    connector: OAuthConnector
+  ): Record<string, unknown> {
     const now = Math.floor(Date.now() / 1000);
     const access = this.signToken({
       typ: 'access',
       clientId: this.config.clientId,
       resource,
       scope,
+      connector,
       iat: now,
       exp: now + ACCESS_TTL_SECONDS,
       jti: crypto.randomUUID()
@@ -183,6 +204,7 @@ export class PersonalOAuth {
       clientId: this.config.clientId,
       resource,
       scope,
+      connector,
       iat: now,
       exp: now + REFRESH_TTL_SECONDS,
       jti: crypto.randomUUID()

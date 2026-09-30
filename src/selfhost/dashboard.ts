@@ -142,9 +142,10 @@ export async function startDashboard(): Promise<void> {
 
       if (url.pathname === '/api/dashboard') {
         const range: UsageRange = parseUsageRange(url.searchParams.get('range'));
-        const [summary, tools, activity, events, status] = await Promise.all([
+        const [summary, tools, clients, activity, events, status] = await Promise.all([
           usage.summary(range),
           usage.tools(range, 20),
+          usage.clients(range),
           usage.activity('today'),
           usage.recentEvents(30),
           dashboardStatus(privatePort, publicPort, runtime.publicBaseUrl)
@@ -155,6 +156,7 @@ export async function startDashboard(): Promise<void> {
           range,
           summary,
           tools,
+          clients,
           activity,
           events,
           status,

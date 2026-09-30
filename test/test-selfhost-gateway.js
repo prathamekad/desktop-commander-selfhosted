@@ -260,6 +260,14 @@ try {
   const usageTools = await usageToolsResponse.json();
   assert.ok(usageTools.tools.some((row) => row.toolName === 'selfhost_list_devices'));
 
+  const usageClientsResponse = await fetch(
+    `${baseUrl}/api/usage/clients?range=all`,
+    { headers: { authorization: `Bearer ${ownerToken}` } }
+  );
+  assert.equal(usageClientsResponse.status, 200);
+  const usageClients = await usageClientsResponse.json();
+  assert.ok(usageClients.clients.some((row) => row.client === 'local-owner'));
+
   const usageActivityResponse = await fetch(
     `${baseUrl}/api/usage/activity?range=today`,
     { headers: { authorization: `Bearer ${ownerToken}` } }
@@ -281,6 +289,7 @@ try {
   assert.match(audit, /tool_completed/);
   assert.match(audit, /gateway_tool/);
   assert.match(audit, /tool_rejected_policy/);
+  assert.match(audit, /"client":"local-owner"/);
   console.log('selfhost gateway integration: PASS');
 } finally {
   if (child.exitCode === null) child.kill('SIGTERM');

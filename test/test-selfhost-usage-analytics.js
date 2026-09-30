@@ -21,10 +21,10 @@ const auditPath = path.join(tempDir, 'audit.jsonl');
 
 const rows = [
   { ts: isoAt(now, 7), event: 'device_registered', deviceId: 'home-1', deviceName: 'Home', toolCount: 26 },
-  { ts: isoAt(now, 8), event: 'tool_completed', callId: 'a', deviceId: 'home-1', toolName: 'get_config', ok: true, durationMs: 100 },
-  { ts: isoAt(now, 8, 10), event: 'gateway_tool', toolName: 'selfhost_list_devices', ok: true, deviceCount: 1 },
-  { ts: isoAt(now, 9), event: 'tool_completed', callId: 'b', deviceId: 'home-1', toolName: 'read_file', ok: false, durationMs: 200 },
-  { ts: isoAt(now, 10), event: 'tool_rejected_policy', deviceId: 'home-1', toolName: 'read_file', reason: 'path_outside_allowed_roots' },
+  { ts: isoAt(now, 8), event: 'tool_completed', callId: 'a', deviceId: 'home-1', toolName: 'get_config', client: 'chatgpt', ok: true, durationMs: 100 },
+  { ts: isoAt(now, 8, 10), event: 'gateway_tool', toolName: 'selfhost_list_devices', client: 'chatgpt', ok: true, deviceCount: 1 },
+  { ts: isoAt(now, 9), event: 'tool_completed', callId: 'b', deviceId: 'home-1', toolName: 'read_file', client: 'claude', ok: false, durationMs: 200 },
+  { ts: isoAt(now, 10), event: 'tool_rejected_policy', deviceId: 'home-1', toolName: 'read_file', client: 'claude', reason: 'path_outside_allowed_roots' },
   { ts: isoAt(now, 11), event: 'tool_timeout', callId: 'c', deviceId: 'home-1', toolName: 'start_process' },
   { ts: isoAt(now, 12), event: 'tool_abandoned_restart', callId: 'd', deviceId: 'home-1', toolName: 'write_file', reason: 'gateway_restarted_before_terminal_receipt' },
   { ts: priorMonth.toISOString(), event: 'tool_completed', callId: 'old', deviceId: 'home-1', toolName: 'get_config', ok: true, durationMs: 50 }
@@ -68,6 +68,16 @@ try {
       ['selfhost_list_devices', 1],
       ['start_process', 1],
       ['write_file', 1]
+    ]
+  );
+
+  const clients = await usage.clients('today');
+  assert.deepEqual(
+    clients.clients.map((row) => [row.client, row.calls]),
+    [
+      ['chatgpt', 2],
+      ['claude', 2],
+      ['legacy-unknown', 2]
     ]
   );
 

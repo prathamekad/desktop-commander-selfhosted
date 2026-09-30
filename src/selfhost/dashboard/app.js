@@ -78,6 +78,59 @@ function renderMetrics(data) {
   setText('mSuccess', formatPercent(counters.successRate));
   setText('mAvgDuration', formatDuration(counters.averageRoutedDurationMs));
 }
+
+function clientPresentation(client) {
+  switch (client) {
+    case 'chatgpt':
+      return { label: 'ChatGPT', initials: 'GPT', css: 'client-chatgpt' };
+    case 'claude':
+      return { label: 'Claude', initials: 'CL', css: 'client-claude' };
+    case 'local-owner':
+      return { label: 'Local owner', initials: 'PC', css: 'client-local' };
+    case 'local-noauth':
+      return { label: 'Local no-auth', initials: 'PC', css: 'client-local' };
+    case 'legacy-unknown':
+      return { label: 'Legacy / unknown', initials: '?', css: 'client-legacy' };
+    case 'unknown-oauth':
+      return { label: 'OAuth / unknown', initials: '?', css: 'client-legacy' };
+    default:
+      return { label: client || 'Other', initials: 'EXT', css: 'client-other' };
+  }
+}
+
+function renderClients(data) {
+  const host = $('clientGrid');
+  host.replaceChildren();
+
+  const rows = data.clients?.clients ?? [];
+  const total = rows.reduce((sum, row) => sum + Number(row.calls ?? 0), 0);
+  setText('clientTotal', `${formatNumber(total)} calls`);
+
+  if (rows.length === 0) {
+    host.appendChild(createElement('div', 'empty', 'No client-attributed calls in this range.'));
+    return;
+  }
+
+  for (const row of rows) {
+    const presentation = clientPresentation(row.client);
+    const card = createElement('article', `client-card ${presentation.css}`);
+    const logo = createElement('div', 'client-logo', presentation.initials);
+    const copy = createElement('div', 'client-copy');
+    const name = createElement('span', 'client-name', presentation.label);
+    const detail = createElement(
+      'span',
+      'client-detail',
+      `${formatNumber(row.successful)} successful / ${formatNumber(row.failed)} failed`
+    );
+    const countWrap = createElement('div', 'client-count', formatNumber(row.calls));
+    const share = total === 0 ? 0 : (Number(row.calls ?? 0) / total) * 100;
+    countWrap.appendChild(createElement('span', 'client-share', `${Math.round(share)}% of calls`));
+
+    copy.append(name, detail);
+    card.append(logo, copy, countWrap);
+    host.appendChild(card);
+  }
+}
 function renderToolChart(data) {
   const host = $('toolChart');
   host.replaceChildren();
@@ -218,7 +271,7 @@ function renderEvents(data) {
   if (events.length === 0) {
     const row = document.createElement('tr');
     const cell = createElement('td', 'empty', 'No audit events yet.');
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     row.appendChild(cell);
     body.appendChild(row);
     return;
@@ -231,6 +284,13 @@ function renderEvents(data) {
     const callType = event.callType === 'gateway-local' ? 'Gateway-local' : 'Routed device';
 
     appendCell(row, when.toLocaleString());
+
+    const clientCell = document.createElement('td');
+    const clientInfo = clientPresentation(event.client);
+    const clientBadge = createElement('span', `client-badge ${event.client}`, clientInfo.label);
+    clientCell.appendChild(clientBadge);
+    row.appendChild(clientCell);
+
     appendCell(row, event.toolName, 'tool-name');
 
     const statusCell = document.createElement('td');
@@ -276,6 +336,7 @@ async function refresh() {
     const data = await response.json();
     renderStatus(data.status);
     renderMetrics(data);
+    renderClients(data);
     renderToolChart(data);
     renderCallMix(data);
     renderActivity(data);

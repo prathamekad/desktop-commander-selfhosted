@@ -30,6 +30,15 @@ export interface ToolUsageRow {
   gatewayLocal: number;
 }
 
+export interface ClientUsageRow {
+  client: string;
+  calls: number;
+  successful: number;
+  failed: number;
+  routed: number;
+  gatewayLocal: number;
+}
+
 export interface HourBucket {
   hour: number;
   label: string;
@@ -41,6 +50,7 @@ export interface HourBucket {
 export interface RecentUsageEvent {
   ts: string;
   toolName: string;
+  client: string;
   outcome: 'success' | 'failed' | 'rejected' | 'timeout' | 'abandoned';
   callType: 'routed-device' | 'gateway-local';
   deviceId?: string;
@@ -74,6 +84,7 @@ interface MutableToolUsage {
 interface DayAggregate {
   counters: MutableCounters;
   tools: Map<string, MutableToolUsage>;
+  clients: Map<string, MutableToolUsage>;
   hours: Map<number, { calls: number; successful: number; failed: number }>;
 }
 
@@ -109,6 +120,7 @@ function emptyAggregate(): DayAggregate {
   return {
     counters: emptyCounters(),
     tools: new Map(),
+    clients: new Map(),
     hours: new Map()
   };
 }
@@ -129,8 +141,8 @@ function validDate(value: unknown): Date | null {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
-function getTool(aggregate: DayAggregate, toolName: string): MutableToolUsage {
-  const existing = aggregate.tools.get(toolName);
+function getUsageRow(map: Map<string, MutableToolUsage>, key: string): MutableToolUsage {
+  const existing = map.get(key);
   if (existing) return existing;
   const created: MutableToolUsage = {
     calls: 0,
@@ -139,8 +151,16 @@ function getTool(aggregate: DayAggregate, toolName: string): MutableToolUsage {
     routed: 0,
     gatewayLocal: 0
   };
-  aggregate.tools.set(toolName, created);
+  map.set(key, created);
   return created;
+}
+
+function getTool(aggregate: DayAggregate, toolName: string): MutableToolUsage {
+  return getUsageRow(aggregate.tools, toolName);
+}
+
+function getClient(aggregate: DayAggregate, client: string): MutableToolUsage {
+  return getUsageRow(aggregate.clients, client);
 }
 
 function recordHour(
@@ -199,6 +219,15 @@ function mergeAggregate(target: DayAggregate, source: DayAggregate): void {
     dest.gatewayLocal += row.gatewayLocal;
   }
 
+  for (const [client, row] of source.clients) {
+    const dest = getClient(target, client);
+    dest.calls += row.calls;
+    dest.successful += row.successful;
+    dest.failed += row.failed;
+    dest.routed += row.routed;
+    dest.gatewayLocal += row.gatewayLocal;
+  }
+
   for (const [hour, row] of source.hours) {
     const dest = target.hours.get(hour) ?? { calls: 0, successful: 0, failed: 0 };
     dest.calls += row.calls;
@@ -211,6 +240,7 @@ function mergeAggregate(target: DayAggregate, source: DayAggregate): void {
 function addTerminalEvent(
   aggregate: DayAggregate,
   toolName: string,
+  client: string,
   successful: boolean,
   callType: RecentUsageEvent['callType'],
   eventType: RecentUsageEvent['outcome'],
@@ -218,13 +248,25 @@ function addTerminalEvent(
 ): void {
   aggregate.counters.totalCalls++;
   const tool = getTool(aggregate, toolName);
+  const clientRow = getClient(aggregate, client);
   tool.calls++;
+  clientRow.calls++;
 
-  if (callType === 'gateway-local') tool.gatewayLocal++;
-  else tool.routed++;
+  if (callType === 'gateway-local') {
+    tool.gatewayLocal++;
+    clientRow.gatewayLocal++;
+  } else {
+    tool.routed++;
+    clientRow.routed++;
+  }
 
-  if (successful) tool.successful++;
-  else tool.failed++;
+  if (successful) {
+    tool.successful++;
+    clientRow.successful++;
+  } else {
+    tool.failed++;
+    clientRow.failed++;
+  }
 
   if (callType === 'gateway-local') {
     if (successful) aggregate.counters.successfulGatewayLocal++;
@@ -291,9 +333,13 @@ function eventFromAudit(
   }
 
   const deviceId = typeof raw.deviceId === 'string' ? raw.deviceId : undefined;
+  const client = typeof raw.client === 'string' && raw.client.trim()
+    ? raw.client.trim()
+    : 'legacy-unknown';
   const event: RecentUsageEvent = {
     ts,
     toolName,
+    client,
     outcome,
     callType
   };
@@ -311,6 +357,7 @@ function aggregateRecentEvent(aggregate: DayAggregate, event: RecentUsageEvent):
   addTerminalEvent(
     aggregate,
     event.toolName,
+    event.client,
     successful,
     event.callType,
     event.outcome,
@@ -356,6 +403,20 @@ export class UsageAnalyticsService {
       .sort((a, b) => b.calls - a.calls || a.toolName.localeCompare(b.toolName))
       .slice(0, Math.max(1, Math.min(limit, 100)));
     return { generatedAt: snapshot.generatedAt, timezone: snapshot.timezone, range, tools };
+  }
+
+  async clients(range: UsageRange = 'all'): Promise<{
+    generatedAt: string;
+    timezone: string;
+    range: UsageRange;
+    clients: ClientUsageRow[];
+  }> {
+    const snapshot = await this.snapshot();
+    const aggregate = this.aggregateForRange(snapshot, range);
+    const clients = [...aggregate.clients.entries()]
+      .map(([client, row]) => ({ client, ...row }))
+      .sort((a, b) => b.calls - a.calls || a.client.localeCompare(b.client));
+    return { generatedAt: snapshot.generatedAt, timezone: snapshot.timezone, range, clients };
   }
 
   async activity(range: UsageRange = 'today'): Promise<{

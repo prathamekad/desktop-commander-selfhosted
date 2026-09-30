@@ -44,6 +44,7 @@ interface DeviceState {
 
 interface TrackedCall extends PendingCall {
   startedMs: number;
+  client: string;
 }
 
 function extractStartedPid(result: unknown): number | null {
@@ -105,6 +106,7 @@ class PersonalRouter {
         callId,
         deviceId: prior.deviceId ?? null,
         toolName: prior.toolName ?? null,
+        client: prior.client ?? 'unknown',
         reason: 'gateway_restarted_before_terminal_receipt'
       });
     }
@@ -132,6 +134,7 @@ class PersonalRouter {
         callId,
         deviceId: tracked.call.deviceId,
         toolName: tracked.call.toolName,
+        client: tracked.client,
         reason
       });
     }
@@ -227,7 +230,11 @@ class PersonalRouter {
       state.pollWaiter = finish;
     });
   }
-  async routeTool(toolName: string, rawArgs: Record<string, unknown>): Promise<unknown> {
+  async routeTool(
+    toolName: string,
+    rawArgs: Record<string, unknown>,
+    client = 'unknown'
+  ): Promise<unknown> {
     if (this.closing) throw new Error('Gateway is shutting down and is not accepting new tool calls');
     const args = { ...rawArgs };
     const requestedDevice = typeof args.deviceId === 'string' ? args.deviceId : undefined;
@@ -250,6 +257,7 @@ class PersonalRouter {
       await this.audit('tool_rejected_policy', {
         deviceId: state.registration.deviceId,
         toolName,
+        client,
         reason
       });
       throw error;
@@ -279,16 +287,25 @@ class PersonalRouter {
         void this.audit('tool_timeout', {
           callId,
           deviceId: call.deviceId,
-          toolName
+          toolName,
+          client
         });
       }, timeoutMs);
 
-      this.pending.set(callId, { call, resolve, reject, timeout, startedMs: Date.now() });
+      this.pending.set(callId, {
+        call,
+        resolve,
+        reject,
+        timeout,
+        startedMs: Date.now(),
+        client
+      });
       this.enqueue(state, call);
       void this.audit('tool_dispatched', {
         callId,
         deviceId: call.deviceId,
-        toolName
+        toolName,
+        client
       });
     });
   }
@@ -323,6 +340,7 @@ class PersonalRouter {
       callId: result.callId,
       deviceId: result.deviceId,
       toolName: tracked.call.toolName,
+      client: tracked.client,
       ok: result.ok,
       durationMs
     });
@@ -423,16 +441,27 @@ function authorized(req: IncomingMessage, expected: string | undefined, allowNoA
   return allowNoAuth || (!!expected && tokenMatches(req.headers.authorization, expected));
 }
 
+interface McpAuthorization {
+  authorized: boolean;
+  client: string;
+}
+
 function authorizedMcp(
   req: IncomingMessage,
   ownerToken: string | undefined,
   oauth: PersonalOAuth | null,
   allowNoAuth: boolean
-): boolean {
-  if (allowNoAuth) return true;
-  if (ownerToken && tokenMatches(req.headers.authorization, ownerToken)) return true;
+): McpAuthorization {
+  if (allowNoAuth) return { authorized: true, client: 'local-noauth' };
+  if (ownerToken && tokenMatches(req.headers.authorization, ownerToken)) {
+    return { authorized: true, client: 'local-owner' };
+  }
   const token = bearerToken(req.headers.authorization);
-  return Boolean(token && oauth?.verifyAccessToken(token));
+  const payload = token ? oauth?.verifyAccessToken(token) : null;
+  return {
+    authorized: Boolean(payload),
+    client: payload?.connector ?? 'unknown-oauth'
+  };
 }
 function sendJson(
   res: ServerResponse,
@@ -500,7 +529,7 @@ function parsePollTimeout(value: unknown): number {
 function isLoopback(host: string): boolean {
   return ['127.0.0.1', 'localhost', '::1'].includes(host);
 }
-function createMcpServer(router: PersonalRouter): Server {
+function createMcpServer(router: PersonalRouter, client: string): Server {
   const server = new Server(
     { name: 'desktop-commander-selfhosted', version: '0.1.0' },
     { capabilities: { tools: {} } }
@@ -528,12 +557,15 @@ function createMcpServer(router: PersonalRouter): Server {
     try {
       if (name === 'selfhost_list_devices') {
         const devices = router.listDevices();
-        await router.auditGatewayTool('selfhost_list_devices', true, { deviceCount: devices.length });
+        await router.auditGatewayTool('selfhost_list_devices', true, {
+          deviceCount: devices.length,
+          client
+        });
         return {
           content: [{ type: 'text', text: JSON.stringify(devices, null, 2) }]
         };
       }
-      return await router.routeTool(name, args) as any;
+      return await router.routeTool(name, args, client) as any;
     } catch (error) {
       return {
         isError: true,
@@ -786,6 +818,10 @@ export async function startGateway(): Promise<void> {
           sendJson(res, 200, await usageAnalytics.tools(range, limit));
           return;
         }
+        if (url.pathname === '/api/usage/clients') {
+          sendJson(res, 200, await usageAnalytics.clients(range));
+          return;
+        }
         if (url.pathname === '/api/usage/activity') {
           sendJson(res, 200, await usageAnalytics.activity(range));
           return;
@@ -801,7 +837,8 @@ export async function startGateway(): Promise<void> {
       }
 
       if (url.pathname === '/mcp') {
-        if (!authorizedMcp(req, ownerToken, oauth, allowNoAuth)) {
+        const mcpAuth = authorizedMcp(req, ownerToken, oauth, allowNoAuth);
+        if (!mcpAuth.authorized) {
           const headers: Record<string, string> = {};
           if (oauth && publicBase) {
             headers['www-authenticate'] =
@@ -824,7 +861,7 @@ export async function startGateway(): Promise<void> {
         }
 
         const body = await readJson(req, maxBodyBytes);
-        const server = createMcpServer(router);
+        const server = createMcpServer(router, mcpAuth.client);
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         res.on('close', () => {
           void transport.close();

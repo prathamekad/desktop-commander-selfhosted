@@ -202,6 +202,7 @@ Private owner-authenticated usage APIs are also available on the core gateway:
 ```text
 GET /api/usage/summary?range=today|month|all
 GET /api/usage/tools?range=today|month|all&limit=25
+GET /api/usage/clients?range=today|month|all
 GET /api/usage/activity?range=today|month|all
 GET /api/usage/events?limit=50
 ```
@@ -213,6 +214,12 @@ for its UI and `GET /api/healthz` for status checks.
 Terminal outcomes are counted once: successful/failed routed completions, gateway-local
 calls, policy rejections, timeouts, and abandoned/unknown calls. Dispatch records are
 not counted as completed tool calls.
+
+OAuth sessions are attributed from the registered callback used during authorization:
+ChatGPT and Claude receive distinct signed connector claims that are propagated into
+terminal audit receipts. Calls recorded before connector attribution existed remain
+`legacy-unknown`; they are never retroactively guessed. Existing OAuth connections
+must authorize once after this upgrade to mint a connector-tagged refresh token.
 
 ## Multiple personal devices
 
