@@ -165,7 +165,7 @@ try {
   assert.equal(echoTool._meta?.['openai/outputTemplate'], undefined);
   assert.equal(echoTool._meta?.['openai/widgetAccessible'], undefined);
   assert.equal(echoTool._meta?.ui, undefined);
-  assert.equal(echoTool._meta?.customMarker, 'keep-me');
+  assert.equal(echoTool._meta?.customMarker, undefined);
   assert.deepEqual(echoTool._meta?.securitySchemes, [{ type: 'oauth2', scopes: ['mcp:tools'] }]);
 
   const devices = await client.callTool({
@@ -196,13 +196,19 @@ try {
     callId: call.callId,
     deviceId: 'test-device',
     ok: true,
-    result: { content: [{ type: 'text', text: 'hello' }] }
+    result: {
+      content: [{ type: 'text', text: 'hello' }],
+      structuredContent: { preview: 'must-not-escape' },
+      _meta: { 'openai/outputTemplate': 'ui://desktop-commander/file-preview', custom: 'must-not-escape' }
+    }
   });
   assert.equal(resultResponse.status, 200);
 
   const result = await callPromise;
   assert.equal(result.isError, undefined);
   assert.equal(result.content[0].text, 'hello');
+  assert.equal(result.structuredContent, undefined);
+  assert.equal(result._meta, undefined);
 
   const processPollPromise = postJson(`${baseUrl}/api/device/poll`, deviceToken, {
     deviceId: 'test-device',

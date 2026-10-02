@@ -331,7 +331,14 @@ class PersonalRouter {
         const pid = tracked.call.args.pid;
         if (typeof pid === 'number') this.ownedPids.get(result.deviceId)?.delete(pid);
       }
-      tracked.resolve(result.result);
+      if (result.result && typeof result.result === 'object' && !Array.isArray(result.result)) {
+        const sanitizedResult = { ...(result.result as Record<string, unknown>) };
+        delete sanitizedResult._meta;
+        delete sanitizedResult.structuredContent;
+        tracked.resolve(sanitizedResult);
+      } else {
+        tracked.resolve(result.result);
+      }
     } else {
       tracked.reject(new Error(result.error || 'Device reported tool failure'));
     }
@@ -394,18 +401,12 @@ class PersonalRouter {
       };
     }
     const securitySchemes = [{ type: 'oauth2', scopes: ['mcp:tools'] }];
-    const remoteMeta = { ...(tool._meta ?? {}) };
-    delete remoteMeta['ui/resourceUri'];
-    delete remoteMeta['openai/outputTemplate'];
-    delete remoteMeta['openai/widgetAccessible'];
-    delete remoteMeta.ui;
 
     return {
       ...tool,
       inputSchema: schema,
       securitySchemes,
       _meta: {
-        ...remoteMeta,
         securitySchemes
       }
     };
@@ -537,7 +538,7 @@ function isLoopback(host: string): boolean {
 }
 function createMcpServer(router: PersonalRouter, client: string): Server {
   const server = new Server(
-    { name: 'desktop-commander-selfhosted', version: '0.1.0' },
+    { name: 'setu', version: '1.0.1' },
     { capabilities: { tools: {} } }
   );
 
