@@ -1,0 +1,9 @@
+# SETU repository ownership.
+# Keep critical gateway/runtime changes explicitly reviewed by the owner.
+* @prathamekad
+
+/src/selfhost/ @prathamekad
+/test/test-selfhost-*.js @prathamekad
+/.github/ @prathamekad
+/package.json @prathamekad
+/package-lock.json @prathamekad
