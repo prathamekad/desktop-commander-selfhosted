@@ -4,7 +4,7 @@ SETU is a self-hosted remote MCP gateway built on Desktop Commander. The SETU
 product line is maintained in this fork; upstream Desktop Commander documentation
 is retained below for attribution and inherited functionality.
 
-**Stable Home v1 checkpoint:** `8dd590db3fa05263a88729f91add3e2bf1737543`  
+**Stable Home v1 checkpoint:** `8dd590db3fa05263a88729f91add3e2bf1737543`
 **Checkpoint tag:** `setu-home-v1-2026-10-02`
 
 For SETU release/version policy, see [docs/RELEASE_STRATEGY.md](docs/RELEASE_STRATEGY.md).
