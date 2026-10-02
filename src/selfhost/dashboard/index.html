@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SETU - Usage Analytics</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Product navigation">
+      <div class="logo-mark" aria-label="SETU">
+        <span class="setu-gateway-logo" aria-hidden="true"></span>
+      </div>
+      <nav class="rail-nav" aria-label="Current section">
+        <button class="rail-item active" type="button" aria-current="page" aria-label="Usage analytics" title="Usage analytics">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg>
+        </button>
+      </nav>
+      <div class="rail-spacer"></div>
+      <div class="rail-health" title="Self-hosted instance">
+        <span class="pulse-dot"></span>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="product-id">
+          <span class="setu-gateway-logo setu-gateway-logo--small" aria-hidden="true"></span>
+          <div>
+            <strong>SETU</strong>
+          </div>
+        </div>
+        <div class="status-strip" id="statusStrip" aria-live="polite"></div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">SELF-HOSTED MCP OBSERVABILITY</p>
+          <h1>Usage Analytics</h1>
+          <p class="subtitle">Live operational insight from your private MCP gateway.</p>
+        </div>
+        <div class="range-control" role="group" aria-label="Usage time range">
+          <button type="button" data-range="today">Today</button>
+          <button type="button" data-range="month">This month</button>
+          <button type="button" class="selected" data-range="all">All time</button>
+        </div>
+      </section>
+
+      <section class="instance-card">
+        <div class="instance-graphic" aria-hidden="true">
+          <div class="server-stack"><i></i><i></i><i></i></div>
+        </div>
+        <div class="instance-copy">
+          <p class="card-label">PRIVATE CONTROL PLANE</p>
+          <h2>Self-hosted instance</h2>
+          <p>No monthly SaaS call cap. Every number here comes directly from your own MCP gateway audit ledger.</p>
+        </div>
+        <div class="instance-meta">
+          <span class="live-pill"><i></i>Live</span>
+          <span id="lastUpdated">Connecting...</span>
+        </div>
+      </section>      <section class="metrics" aria-label="Usage summary">
+        <article class="metric-card tone-cyan">
+          <div class="metric-icon"><span class="stack-icon"></span></div>
+          <div class="metric-copy"><span>Total MCP calls</span><strong id="mTotal">--</strong><small>Terminal outcomes</small></div>
+        </article>
+        <article class="metric-card tone-green">
+          <div class="metric-icon"><span class="check-icon"></span></div>
+          <div class="metric-copy"><span>Successful routed</span><strong id="mRouted">--</strong><small>Device-executed calls</small></div>
+        </article>
+        <article class="metric-card tone-blue">
+          <div class="metric-icon"><span class="gateway-icon"></span></div>
+          <div class="metric-copy"><span>Gateway-local</span><strong id="mGateway">--</strong><small>Answered by gateway</small></div>
+        </article>
+        <article class="metric-card tone-red">
+          <div class="metric-icon"><span class="shield-icon"></span></div>
+          <div class="metric-copy"><span>Policy rejected</span><strong id="mRejected">--</strong><small>Fail-closed decisions</small></div>
+        </article>
+
+        <article class="metric-card tone-amber">
+          <div class="metric-icon"><span class="clock-icon"></span></div>
+          <div class="metric-copy"><span>Timeouts</span><strong id="mTimeouts">--</strong><small>Execution deadline hit</small></div>
+        </article>
+        <article class="metric-card tone-violet">
+          <div class="metric-icon"><span class="unknown-icon">?</span></div>
+          <div class="metric-copy"><span>Abandoned / unknown</span><strong id="mAbandoned">--</strong><small>Restart or shutdown ambiguity</small></div>
+        </article>
+        <article class="metric-card tone-teal">
+          <div class="metric-icon"><span class="today-icon"></span></div>
+          <div class="metric-copy"><span>Today</span><strong id="mToday">--</strong><small>Calls so far today</small></div>
+        </article>
+        <article class="metric-card tone-cyan">
+          <div class="metric-icon"><span class="trend-icon"></span></div>
+          <div class="metric-copy"><span>Success rate</span><strong id="mSuccess">--</strong><small id="mAvgDuration">Average routed latency --</small></div>
+        </article>
+      </section>
+
+      <section class="clients-panel panel">
+        <header class="panel-head clients-head">
+          <div><p class="panel-kicker">CONNECTOR ATTRIBUTION</p><h2>Client activity</h2></div>
+          <span class="panel-total" id="clientTotal">--</span>
+        </header>
+        <div class="client-grid" id="clientGrid"></div>
+      </section>
+
+      <section class="analytics-grid">
+        <article class="panel tool-panel">
+          <header class="panel-head">
+            <div><p class="panel-kicker">DISTRIBUTION</p><h2>Tool usage</h2></div>
+            <span class="panel-total" id="toolTotal">--</span>
+          </header>
+          <div class="tool-chart-wrap">
+            <div class="chart-grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+            <div class="bar-chart" id="toolChart"></div>
+          </div>
+        </article>
+
+        <article class="panel mix-panel">
+          <header class="panel-head">
+            <div><p class="panel-kicker">OUTCOMES</p><h2>Call mix</h2></div>
+            <span class="panel-total" id="mixTotal">--</span>
+          </header>
+          <div class="donut-wrap">
+            <div class="donut" id="callDonut">
+              <div class="donut-core"><strong id="donutTotal">--</strong><span>calls</span></div>
+            </div>
+            <div class="legend" id="callLegend"></div>
+          </div>
+        </article>        <article class="panel today-panel">
+          <header class="panel-head">
+            <div><p class="panel-kicker">24-HOUR WINDOW</p><h2>Today</h2></div>
+            <span class="panel-total" id="todayTotal">--</span>
+          </header>
+          <div class="activity-wrap">
+            <div class="activity-axis" aria-hidden="true"><span>2</span><span>1</span><span>0</span></div>
+            <div class="activity-chart" id="activityChart"></div>
+            <div class="time-axis" aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="events-panel">
+        <header class="panel-head events-head">
+          <div><p class="panel-kicker">AUDIT LEDGER</p><h2>Recent events</h2></div>
+          <div class="events-meta"><span id="eventCount">--</span><span class="ledger-dot"></span></div>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>Client</th><th>Tool</th><th>Status</th><th>Call type</th><th>Device / detail</th><th>Latency</th></tr>
+            </thead>
+            <tbody id="eventsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span>Local analytics only</span>
+        <span class="footer-sep"></span>
+        <span>No external telemetry</span>
+        <span class="footer-spacer"></span>
+        <span id="footerRange">All-time view</span>
+      </footer>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
