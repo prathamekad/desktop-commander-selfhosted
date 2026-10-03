@@ -156,6 +156,9 @@ try {
   const listed = await client.listTools();
   assert.ok(listed.tools.some((tool) => tool.name === 'echo_selfhost_test'));
   assert.ok(listed.tools.some((tool) => tool.name === 'selfhost_list_devices'));
+  assert.ok(listed.tools.some((tool) => tool.name === 'start_shutdown_watch'));
+  assert.ok(listed.tools.some((tool) => tool.name === 'shutdown'));
+  assert.ok(listed.tools.some((tool) => tool.name === 'cancel_shutdown'));
   assert.ok(listed.tools.some((tool) => tool.name === 'start_process'));
   assert.equal(listed.tools.some((tool) => tool.name === 'set_config_value'), false);
 

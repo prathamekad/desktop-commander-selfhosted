@@ -91,6 +91,8 @@ async function status(): Promise<void> {
   console.log('SETU');
   console.log(`Supervisor:  ${pid ? `RUNNING (PID ${pid})` : 'STOPPED'}`);
   console.log(`Workspace:   ${runtime.allowedRoots?.join(', ') || 'NOT CONFIGURED'}`);
+  console.log(`Read-only:   ${runtime.readOnlyRoots?.join(', ') || 'NONE'}`);
+  console.log(`Watcher:     ${runtime.shutdownWatchScript || 'NOT CONFIGURED'}`);
   console.log(`Public MCP:  ${runtime.publicBaseUrl ? runtime.publicBaseUrl + '/mcp' : 'NOT CONFIGURED'}`);
 
   try {

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { execFile, spawn } from 'child_process';
 import fs from 'fs/promises';
 import http, { IncomingMessage, ServerResponse } from 'http';
 import os from 'os';
@@ -68,7 +69,9 @@ class PersonalRouter {
 
   constructor(
     private readonly auditPath: string,
-    private readonly allowedRoots: string[]
+    private readonly allowedRoots: string[],
+    private readonly readOnlyRoots: string[] = [],
+    private readonly shutdownWatchScript?: string
   ) {}
 
   get acceptingCalls(): boolean {
@@ -194,6 +197,71 @@ class PersonalRouter {
     await this.audit('gateway_tool', { toolName, ok, ...fields });
   }
 
+  async startShutdownWatch(client: string): Promise<unknown> {
+    if (process.platform !== 'win32') throw new Error('Shutdown watcher is supported only on Windows.');
+    if (!this.shutdownWatchScript) throw new Error('No shutdown watcher script is configured.');
+
+    const scriptPath = path.win32.normalize(this.shutdownWatchScript);
+    await fs.access(scriptPath);
+
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+      { detached: true, windowsHide: true, stdio: 'ignore' }
+    );
+    child.unref();
+
+    await this.auditGatewayTool('start_shutdown_watch', true, {
+      client,
+      scriptPath,
+      pid: child.pid ?? null
+    });
+
+    return {
+      content: [{
+        type: 'text',
+        text: `Started shutdown watcher as a detached process (PID ${child.pid ?? 'unknown'}): ${scriptPath}`
+      }]
+    };
+  }
+
+  async scheduleShutdown(delaySeconds: number, client: string): Promise<unknown> {
+    if (process.platform !== 'win32') throw new Error('Shutdown is supported only on Windows.');
+    if (!Number.isInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > 3600) {
+      throw new Error('delaySeconds must be an integer from 0 to 3600.');
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        'shutdown.exe',
+        ['/s', '/t', String(delaySeconds), '/c', 'SETU requested shutdown'],
+        { windowsHide: true },
+        (error) => error ? reject(error) : resolve()
+      );
+    });
+
+    await this.auditGatewayTool('shutdown', true, { client, delaySeconds });
+    return {
+      content: [{
+        type: 'text',
+        text: `Windows shutdown scheduled in ${delaySeconds} second(s). Use cancel_shutdown to abort it before execution.`
+      }]
+    };
+  }
+
+  async cancelShutdown(client: string): Promise<unknown> {
+    if (process.platform !== 'win32') throw new Error('Shutdown cancellation is supported only on Windows.');
+
+    await new Promise<void>((resolve, reject) => {
+      execFile('shutdown.exe', ['/a'], { windowsHide: true }, (error) => error ? reject(error) : resolve());
+    });
+
+    await this.auditGatewayTool('cancel_shutdown', true, { client });
+    return {
+      content: [{ type: 'text', text: 'Pending Windows shutdown was cancelled.' }]
+    };
+  }
+
   async poll(deviceId: string, timeoutMs: number): Promise<RoutedCall | null> {
     if (this.closing) return null;
     const state = this.devices.get(deviceId);
@@ -242,7 +310,7 @@ class PersonalRouter {
     const state = this.selectDevice(toolName, requestedDevice);
 
     try {
-      assertRemoteToolPolicy(toolName, args, this.allowedRoots);
+      assertRemoteToolPolicy(toolName, args, this.allowedRoots, this.readOnlyRoots);
       if (isPidControlledTool(toolName)) {
         const pid = typeof args.pid === 'number' ? args.pid : NaN;
         if (!Number.isInteger(pid) || !this.ownedPids.get(state.registration.deviceId)?.has(pid)) {
@@ -554,6 +622,42 @@ function createMcpServer(router: PersonalRouter, client: string): Server {
           securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }]
         }
       },
+      {
+        name: 'start_shutdown_watch',
+        description: 'Launch the single configured Home shutdown-watch.ps1 script as a detached background process.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+        securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
+        _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }] }
+      },
+      {
+        name: 'shutdown',
+        description: 'Schedule a Windows shutdown on the SETU gateway host. The shutdown can be aborted with cancel_shutdown before it executes.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            delaySeconds: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 3600,
+              default: 60,
+              description: 'Delay before shutdown in seconds. Defaults to 60.'
+            }
+          },
+          additionalProperties: false
+        },
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+        securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
+        _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }] }
+      },
+      {
+        name: 'cancel_shutdown',
+        description: 'Abort a pending Windows shutdown previously scheduled on the SETU gateway host.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
+        _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }] }
+      },
       ...router.listTools()
     ] as any
   }));
@@ -571,6 +675,16 @@ function createMcpServer(router: PersonalRouter, client: string): Server {
         return {
           content: [{ type: 'text', text: JSON.stringify(devices, null, 2) }]
         };
+      }
+      if (name === 'start_shutdown_watch') {
+        return await router.startShutdownWatch(client) as any;
+      }
+      if (name === 'shutdown') {
+        const delaySeconds = args.delaySeconds === undefined ? 60 : Number(args.delaySeconds);
+        return await router.scheduleShutdown(delaySeconds, client) as any;
+      }
+      if (name === 'cancel_shutdown') {
+        return await router.cancelShutdown(client) as any;
       }
       return await router.routeTool(name, args, client) as any;
     } catch (error) {
@@ -648,12 +762,18 @@ export async function startGateway(): Promise<void> {
     .map((value) => value.trim())
     .filter(Boolean);
   const allowedRoots = envAllowedRoots.length > 0 ? envAllowedRoots : (runtimeConfig.allowedRoots ?? []);
+  const readOnlyRoots = runtimeConfig.readOnlyRoots ?? [];
   if (allowedRoots.length === 0) {
     throw new Error(
       'No remote workspace roots are configured. Run: npm run selfhost:configure -- --allowed-root <path>'
     );
   }
-  const router = new PersonalRouter(auditPath, allowedRoots);
+  const router = new PersonalRouter(
+    auditPath,
+    allowedRoots,
+    readOnlyRoots,
+    runtimeConfig.shutdownWatchScript
+  );
   const usageAnalytics = new UsageAnalyticsService(auditPath);
   await router.initialize();
   let shuttingDown = false;

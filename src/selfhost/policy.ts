@@ -29,6 +29,14 @@ const PROCESS_PID_TOOLS = new Set([
   'force_terminate'
 ]);
 
+const READ_ONLY_PATH_TOOLS = new Set([
+  'read_file',
+  'read_multiple_files',
+  'list_directory',
+  'start_search',
+  'get_file_info'
+]);
+
 const DENIED_COMMAND_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /(^|[\\/\s'"\x60])\.\.([\\/]|$)/i, reason: 'parent-directory traversal' },
   { pattern: /(^|\s)~[\\/]/, reason: 'home-directory expansion' },
@@ -44,7 +52,7 @@ const DENIED_COMMAND_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
     reason: 'environment-based path escape'
   },
   {
-    pattern: /\b(?:set-itemproperty|new-itemproperty|remove-itemproperty|stop-computer|restart-computer|set-service|stop-service|start-service|new-service|set-executionpolicy|add-mppreference|set-mppreference|remove-mppreference|new-netfirewallrule|remove-netfirewallrule|set-netfirewallprofile|disable-netadapter|enable-netadapter)\b/i,
+    pattern: /\b(?:shutdown(?:\.exe)?|reboot|halt|poweroff|set-itemproperty|new-itemproperty|remove-itemproperty|stop-computer|restart-computer|set-service|stop-service|start-service|new-service|set-executionpolicy|add-mppreference|set-mppreference|remove-mppreference|new-netfirewallrule|remove-netfirewallrule|set-netfirewallprofile|disable-netadapter|enable-netadapter)\b/i,
     reason: 'system-management command'
   }
 ];
@@ -116,7 +124,8 @@ function extractAbsoluteWindowsPaths(command: string): string[] {
 export function assertRemoteToolPolicy(
   toolName: string,
   args: Record<string, unknown>,
-  allowedRoots: string[]
+  allowedRoots: string[],
+  readOnlyRoots: string[] = []
 ): void {
   if (!isRemoteToolVisible(toolName)) {
     throw new RemotePolicyError(
@@ -132,12 +141,16 @@ export function assertRemoteToolPolicy(
     );
   }
 
+  const fileRoots = READ_ONLY_PATH_TOOLS.has(toolName)
+    ? [...allowedRoots, ...readOnlyRoots]
+    : allowedRoots;
+
   for (const requestedPath of collectToolPaths(toolName, args)) {
-    if (!pathAllowed(requestedPath, allowedRoots)) {
-      throw new RemotePolicyError(
-        `Path is outside the approved remote workspace roots: ${requestedPath}`,
-        'path_outside_allowed_roots'
-      );
+    if (!pathAllowed(requestedPath, fileRoots)) {
+      const message = READ_ONLY_PATH_TOOLS.has(toolName)
+        ? `Path is outside the approved remote read roots: ${requestedPath}`
+        : `Path is outside the approved remote writable roots: ${requestedPath}`;
+      throw new RemotePolicyError(message, 'path_outside_allowed_roots');
     }
   }
 

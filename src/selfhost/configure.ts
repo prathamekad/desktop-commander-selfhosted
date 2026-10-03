@@ -21,6 +21,8 @@ const portRaw = valueAfter('--port');
 const publicPortRaw = valueAfter('--public-port');
 const dashboardPortRaw = valueAfter('--dashboard-port');
 const allowedRoots = valuesAfter('--allowed-root');
+const readOnlyRoots = valuesAfter('--read-only-root');
+const shutdownWatchScript = valueAfter('--shutdown-watch-script');
 const oauthRedirectUris = valuesAfter('--oauth-redirect-uri');
 
 const current = await loadRuntimeConfig();
@@ -56,6 +58,12 @@ if (dashboardPortRaw) {
 }
 if (allowedRoots.length > 0) {
   current.allowedRoots = [...new Set(allowedRoots)];
+}
+if (readOnlyRoots.length > 0) {
+  current.readOnlyRoots = [...new Set(readOnlyRoots)];
+}
+if (shutdownWatchScript) {
+  current.shutdownWatchScript = shutdownWatchScript;
 }
 if (oauthRedirectUris.length > 0) {
   current.oauthRedirectUris = [...new Set(

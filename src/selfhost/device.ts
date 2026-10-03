@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { configManager } from '../config-manager.js';
 import { DesktopCommanderIntegration } from '../remote-device/desktop-commander-integration.js';
 import { VERSION } from '../version.js';
 import { loadDeviceSecret } from './credentials.js';
@@ -147,6 +148,17 @@ export async function startSelfHostedDevice(): Promise<void> {
   const deviceName = process.env.SELFHOST_DEVICE_NAME ?? os.hostname();
   const journal = new AttemptJournal();
   await journal.load();
+
+  const configuredRoots = [
+    ...(runtimeConfig.allowedRoots ?? []),
+    ...(runtimeConfig.readOnlyRoots ?? [])
+  ];
+  if (configuredRoots.length > 0) {
+    await configManager.updateValue('allowedDirectories', (current) => {
+      const existing = Array.isArray(current) ? current.filter((value) => typeof value === 'string') : [];
+      return [...new Set([...existing, ...configuredRoots])];
+    });
+  }
 
   const desktop = new DesktopCommanderIntegration();
   await desktop.initialize();

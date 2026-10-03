@@ -7,6 +7,7 @@ import {
 } from '../dist/selfhost/policy.js';
 
 const roots = ['D:\\AI-Lab'];
+const readOnlyRoots = ['C:\\Users\\Prathamesh\\AppData\\Local\\hermes'];
 
 assert.equal(pathAllowed('D:\\AI-Lab', roots), true);
 assert.equal(pathAllowed('D:\\AI-Lab\\project\\file.txt', roots), true);
@@ -19,12 +20,48 @@ assert.equal(isRemoteToolVisible('give_feedback_to_desktop_commander'), false);
 assert.equal(isRemoteToolVisible('read_file'), true);
 
 assert.doesNotThrow(() => {
-  assertRemoteToolPolicy('read_file', { path: 'D:\\AI-Lab\\project\\file.txt' }, roots);
+  assertRemoteToolPolicy('read_file', { path: 'D:\\AI-Lab\\project\\file.txt' }, roots, readOnlyRoots);
+});
+
+assert.doesNotThrow(() => {
+  assertRemoteToolPolicy(
+    'read_file',
+    { path: 'C:\\Users\\Prathamesh\\AppData\\Local\\hermes\\state.json' },
+    roots,
+    readOnlyRoots
+  );
+});
+
+assert.doesNotThrow(() => {
+  assertRemoteToolPolicy(
+    'list_directory',
+    { path: 'C:\\Users\\Prathamesh\\AppData\\Local\\hermes' },
+    roots,
+    readOnlyRoots
+  );
 });
 
 assert.throws(() => {
-  assertRemoteToolPolicy('read_file', { path: 'C:\\Users\\Prathamesh\\secret.txt' }, roots);
-}, /outside the approved remote workspace roots/i);
+  assertRemoteToolPolicy(
+    'write_file',
+    { path: 'C:\\Users\\Prathamesh\\AppData\\Local\\hermes\\state.json' },
+    roots,
+    readOnlyRoots
+  );
+}, /outside the approved remote writable roots/i);
+
+assert.throws(() => {
+  assertRemoteToolPolicy(
+    'edit_block',
+    { file_path: 'C:\\Users\\Prathamesh\\AppData\\Local\\hermes\\state.json' },
+    roots,
+    readOnlyRoots
+  );
+}, /outside the approved remote writable roots/i);
+
+assert.throws(() => {
+  assertRemoteToolPolicy('read_file', { path: 'C:\\Users\\Prathamesh\\secret.txt' }, roots, readOnlyRoots);
+}, /outside the approved remote read roots/i);
 
 assert.throws(() => {
   assertRemoteToolPolicy('read_file', { path: 'https://example.com', isUrl: true }, roots);
@@ -39,8 +76,17 @@ assert.throws(() => {
 }, /node:local is disabled/i);
 
 assert.throws(() => {
-  assertRemoteToolPolicy('start_process', { command: 'type C:\\Windows\\win.ini', timeout_ms: 1000 }, roots);
+  assertRemoteToolPolicy('start_process', { command: 'type C:\\Windows\\win.ini', timeout_ms: 1000 }, roots, readOnlyRoots);
 }, /outside approved roots/i);
+
+assert.throws(() => {
+  assertRemoteToolPolicy(
+    'start_process',
+    { command: 'shutdown /s /t 60', timeout_ms: 1000 },
+    roots,
+    readOnlyRoots
+  );
+}, /system-management command|outside approved roots/i);
 
 assert.throws(() => {
   assertRemoteToolPolicy('start_process', { command: 'Get-Content ..\\secret.txt', timeout_ms: 1000 }, roots);
