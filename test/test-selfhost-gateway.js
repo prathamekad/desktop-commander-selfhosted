@@ -157,6 +157,8 @@ try {
   assert.ok(listed.tools.some((tool) => tool.name === 'echo_selfhost_test'));
   assert.ok(listed.tools.some((tool) => tool.name === 'selfhost_list_devices'));
   assert.ok(listed.tools.some((tool) => tool.name === 'start_shutdown_watch'));
+  assert.ok(listed.tools.some((tool) => tool.name === 'get_shutdown_watch_status'));
+  assert.ok(listed.tools.some((tool) => tool.name === 'stop_shutdown_watch'));
   assert.ok(listed.tools.some((tool) => tool.name === 'shutdown'));
   assert.ok(listed.tools.some((tool) => tool.name === 'cancel_shutdown'));
   assert.ok(listed.tools.some((tool) => tool.name === 'start_process'));

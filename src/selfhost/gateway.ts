@@ -48,6 +48,12 @@ interface TrackedCall extends PendingCall {
   client: string;
 }
 
+interface ShutdownWatchState {
+  pid: number;
+  scriptPath: string;
+  startedAt: string;
+}
+
 function extractStartedPid(result: unknown): number | null {
   try {
     const text = typeof result === 'string' ? result : JSON.stringify(result);
@@ -197,9 +203,210 @@ class PersonalRouter {
     await this.audit('gateway_tool', { toolName, ok, ...fields });
   }
 
+  private shutdownWatchStatePath(): string {
+    return path.join(path.dirname(this.auditPath), 'shutdown-watch-state.json');
+  }
+
+  private async readShutdownWatchState(): Promise<ShutdownWatchState | null> {
+    try {
+      const parsed = JSON.parse(await fs.readFile(this.shutdownWatchStatePath(), 'utf8')) as ShutdownWatchState;
+      if (!Number.isInteger(parsed.pid) || parsed.pid <= 0 || typeof parsed.scriptPath !== 'string') return null;
+      return parsed;
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  private async writeShutdownWatchState(state: ShutdownWatchState): Promise<void> {
+    const target = this.shutdownWatchStatePath();
+    const temp = `${target}.${process.pid}.tmp`;
+    await fs.writeFile(temp, JSON.stringify(state, null, 2), { mode: 0o600 });
+    await fs.rename(temp, target);
+  }
+
+  private async clearShutdownWatchState(): Promise<void> {
+    await fs.unlink(this.shutdownWatchStatePath()).catch((error: any) => {
+      if (error?.code !== 'ENOENT') throw error;
+    });
+  }
+
+  private async inspectShutdownWatchProcess(state: ShutdownWatchState): Promise<{
+    running: boolean;
+    pid: number;
+    scriptPath: string;
+    startedAt: string;
+    processName?: string;
+    commandLine?: string;
+    creationDate?: string;
+  }> {
+    if (process.platform !== 'win32') {
+      return { running: false, ...state };
+    }
+
+    const command = `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${state.pid}" -ErrorAction SilentlyContinue; if($p){[pscustomobject]@{ProcessId=$p.ProcessId;Name=$p.Name;CommandLine=$p.CommandLine;CreationDate=$p.CreationDate}|ConvertTo-Json -Compress}`;
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-Command', command],
+        { windowsHide: true, encoding: 'utf8' },
+        (error, output) => error ? reject(error) : resolve(output ?? '')
+      );
+    });
+
+    if (!stdout.trim()) return { running: false, ...state };
+
+    const processInfo = JSON.parse(stdout.trim()) as {
+      ProcessId?: number;
+      Name?: string;
+      CommandLine?: string;
+      CreationDate?: string;
+    };
+    const commandLine = processInfo.CommandLine ?? '';
+    const expected = path.win32.normalize(state.scriptPath).toLowerCase();
+    const running = (processInfo.Name ?? '').toLowerCase() === 'powershell.exe'
+      && commandLine.toLowerCase().includes(expected);
+
+    return {
+      running,
+      pid: state.pid,
+      scriptPath: state.scriptPath,
+      startedAt: state.startedAt,
+      processName: processInfo.Name,
+      commandLine,
+      creationDate: processInfo.CreationDate
+    };
+  }
+
+  private async discoverShutdownWatchState(): Promise<ShutdownWatchState | null> {
+    if (process.platform !== 'win32' || !this.shutdownWatchScript) return null;
+
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          "Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'powershell.exe' } | Select-Object ProcessId,Name,CommandLine,CreationDate | ConvertTo-Json -Compress"
+        ],
+        { windowsHide: true, encoding: 'utf8' },
+        (error, output) => error ? reject(error) : resolve(output ?? '')
+      );
+    });
+    if (!stdout.trim()) return null;
+
+    const parsed = JSON.parse(stdout.trim()) as Record<string, unknown> | Record<string, unknown>[];
+    const processes = Array.isArray(parsed) ? parsed : [parsed];
+    const expected = path.win32.normalize(this.shutdownWatchScript).toLowerCase();
+    const match = processes.find((item) => {
+      const commandLine = typeof item.CommandLine === 'string' ? item.CommandLine.toLowerCase() : '';
+      return Number.isInteger(Number(item.ProcessId)) && commandLine.includes(expected);
+    });
+    if (!match) return null;
+
+    const state: ShutdownWatchState = {
+      pid: Number(match.ProcessId),
+      scriptPath: path.win32.normalize(this.shutdownWatchScript),
+      startedAt: typeof match.CreationDate === 'string' ? match.CreationDate : nowIso()
+    };
+    await this.writeShutdownWatchState(state);
+    return state;
+  }
+
+  private async currentShutdownWatchState(): Promise<ShutdownWatchState | null> {
+    const persisted = await this.readShutdownWatchState();
+    if (persisted) {
+      const status = await this.inspectShutdownWatchProcess(persisted);
+      if (status.running) return persisted;
+      await this.clearShutdownWatchState();
+    }
+    return await this.discoverShutdownWatchState();
+  }
+
+  async getShutdownWatchStatus(client: string): Promise<unknown> {
+    const state = await this.currentShutdownWatchState();
+    if (!state) {
+      await this.auditGatewayTool('get_shutdown_watch_status', true, { client, running: false });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ running: false }, null, 2) }]
+      };
+    }
+
+    const status = await this.inspectShutdownWatchProcess(state);
+    if (!status.running) await this.clearShutdownWatchState();
+    await this.auditGatewayTool('get_shutdown_watch_status', true, {
+      client,
+      running: status.running,
+      pid: status.pid
+    });
+    return {
+      content: [{ type: 'text', text: JSON.stringify(status, null, 2) }]
+    };
+  }
+
+  async stopShutdownWatch(client: string): Promise<unknown> {
+    const state = await this.currentShutdownWatchState();
+    if (!state) {
+      await this.auditGatewayTool('stop_shutdown_watch', true, { client, running: false, stopped: false });
+      return {
+        content: [{ type: 'text', text: 'No SETU-managed shutdown watcher is running.' }]
+      };
+    }
+
+    const status = await this.inspectShutdownWatchProcess(state);
+    if (!status.running) {
+      await this.clearShutdownWatchState();
+      await this.auditGatewayTool('stop_shutdown_watch', true, {
+        client,
+        running: false,
+        stopped: false,
+        stalePid: state.pid
+      });
+      return {
+        content: [{ type: 'text', text: 'No SETU-managed shutdown watcher is running; stale watcher state was cleared.' }]
+      };
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        'taskkill.exe',
+        ['/PID', String(state.pid), '/T', '/F'],
+        { windowsHide: true },
+        (error) => error ? reject(error) : resolve()
+      );
+    });
+    await this.clearShutdownWatchState();
+    await this.auditGatewayTool('stop_shutdown_watch', true, {
+      client,
+      running: true,
+      stopped: true,
+      pid: state.pid,
+      scriptPath: state.scriptPath
+    });
+    return {
+      content: [{ type: 'text', text: `Stopped SETU-managed shutdown watcher PID ${state.pid}.` }]
+    };
+  }
+
   async startShutdownWatch(client: string): Promise<unknown> {
     if (process.platform !== 'win32') throw new Error('Shutdown watcher is supported only on Windows.');
     if (!this.shutdownWatchScript) throw new Error('No shutdown watcher script is configured.');
+
+    const existing = await this.currentShutdownWatchState();
+    if (existing) {
+      await this.auditGatewayTool('start_shutdown_watch', true, {
+        client,
+        scriptPath: existing.scriptPath,
+        pid: existing.pid,
+        alreadyRunning: true
+      });
+      return {
+        content: [{
+          type: 'text',
+          text: `Shutdown watcher is already running (PID ${existing.pid}): ${existing.scriptPath}`
+        }]
+      };
+    }
 
     const scriptPath = path.win32.normalize(this.shutdownWatchScript);
     await fs.access(scriptPath);
@@ -209,18 +416,26 @@ class PersonalRouter {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
       { detached: true, windowsHide: true, stdio: 'ignore' }
     );
+    if (!child.pid) throw new Error('Shutdown watcher process did not return a PID.');
     child.unref();
+
+    const state: ShutdownWatchState = {
+      pid: child.pid,
+      scriptPath,
+      startedAt: nowIso()
+    };
+    await this.writeShutdownWatchState(state);
 
     await this.auditGatewayTool('start_shutdown_watch', true, {
       client,
       scriptPath,
-      pid: child.pid ?? null
+      pid: child.pid
     });
 
     return {
       content: [{
         type: 'text',
-        text: `Started shutdown watcher as a detached process (PID ${child.pid ?? 'unknown'}): ${scriptPath}`
+        text: `Started shutdown watcher as a detached process (PID ${child.pid}): ${scriptPath}`
       }]
     };
   }
@@ -658,6 +873,22 @@ function createMcpServer(router: PersonalRouter, client: string): Server {
         securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
         _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }] }
       },
+      {
+        name: 'get_shutdown_watch_status',
+        description: 'Report whether the exact SETU-managed shutdown watcher is running, including its PID and configured script path.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
+        _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }] }
+      },
+      {
+        name: 'stop_shutdown_watch',
+        description: 'Stop only the SETU-managed shutdown watcher whose persisted PID still matches the exact configured watcher script.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+        securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }],
+        _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp:tools'] }] }
+      },
       ...router.listTools()
     ] as any
   }));
@@ -685,6 +916,12 @@ function createMcpServer(router: PersonalRouter, client: string): Server {
       }
       if (name === 'cancel_shutdown') {
         return await router.cancelShutdown(client) as any;
+      }
+      if (name === 'get_shutdown_watch_status') {
+        return await router.getShutdownWatchStatus(client) as any;
+      }
+      if (name === 'stop_shutdown_watch') {
+        return await router.stopShutdownWatch(client) as any;
       }
       return await router.routeTool(name, args, client) as any;
     } catch (error) {
